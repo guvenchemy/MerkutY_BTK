@@ -35,7 +35,8 @@ pip install -r requirements.txt
 ### 3. Database Kurulumu
 ```bash
 # PostgreSQL'de database oluştur
-createdb nexus_db
+createdb -U postgres nexus_db
+
 
 # Environment dosyasını oluştur
 cp env.example .env

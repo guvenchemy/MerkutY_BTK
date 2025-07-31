@@ -66,6 +66,37 @@ interface WordExplanation {
   example_explanation: string;
 }
 
+interface GrammarAnalysis {
+  grammar_patterns: Array<{
+    pattern: string;
+    explanation: string;
+    examples: string[];
+    rules: string[];
+    difficulty: string;
+  }>;
+  key_grammar_points: Array<{
+    point: string;
+    description: string;
+    examples: string[];
+    learning_tip: string;
+  }>;
+  vocabulary_grammar_connection: Array<{
+    word: string;
+    grammar_usage: string;
+    examples: string[];
+  }>;
+  learning_recommendations: string[];
+  summary: string;
+}
+
+interface GrammarAnalysisResult {
+  grammar_analysis: GrammarAnalysis;
+  original_text: string;
+  analysis_type: string;
+  total_patterns: number;
+  learning_points: number;
+}
+
 export default function Home() {
   // Authentication State
   const [isLoggedIn, setIsLoggedIn] = useState(false);
@@ -96,6 +127,11 @@ export default function Home() {
   
   // Settings State
   const [targetUnknownPercentage, setTargetUnknownPercentage] = useState(10);
+
+  // Grammar Analysis State
+  const [grammarAnalysisResult, setGrammarAnalysisResult] = useState<GrammarAnalysisResult | null>(null);
+  const [isLoadingGrammarAnalysis, setIsLoadingGrammarAnalysis] = useState(false);
+  const [grammarAnalysisError, setGrammarAnalysisError] = useState('');
 
   // Handle login
   const handleLogin = async (e: React.FormEvent) => {
@@ -337,6 +373,45 @@ export default function Home() {
       alert('Kelime eklenirken hata oluştu.');
     } finally {
       setIsAddingWord(false);
+    }
+  };
+
+  const handleGrammarAnalysis = async () => {
+    const textToAnalyze = originalText || adaptedText;
+    
+    if (!textToAnalyze.trim()) {
+      alert('Please provide some text to analyze (either original or adapted text)');
+      return;
+    }
+
+    setIsLoadingGrammarAnalysis(true);
+    setGrammarAnalysisError('');
+    setGrammarAnalysisResult(null);
+
+    try {
+      const response = await fetch('http://localhost:8000/api/adaptation/grammar-analysis', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({
+          text: textToAnalyze,
+          username: currentUser
+        }),
+      });
+
+      if (!response.ok) {
+        const errorData = await response.json();
+        throw new Error(errorData.detail || 'Failed to analyze grammar.');
+      }
+
+      const data = await response.json();
+      setGrammarAnalysisResult(data);
+      
+    } catch (err: any) {
+      setGrammarAnalysisError(err.message);
+    } finally {
+      setIsLoadingGrammarAnalysis(false);
     }
   };
 
@@ -595,6 +670,135 @@ export default function Home() {
                 </button>
               </div>
             </form>
+
+            {/* Grammar Analysis Button */}
+            {(originalText || adaptedText) && (
+              <div className="w-full max-w-3xl mx-auto mb-8">
+                <button
+                  onClick={handleGrammarAnalysis}
+                  disabled={isLoadingGrammarAnalysis}
+                  className="w-full bg-purple-600 hover:bg-purple-700 disabled:bg-purple-800 text-white font-bold py-3 px-6 rounded-lg transition-colors duration-300 disabled:opacity-50"
+                >
+                  {isLoadingGrammarAnalysis ? '🔍 Analyzing Grammar...' : '📚 Analyze Grammar & Learn Rules'}
+                </button>
+                <p className="text-center text-sm text-gray-400 mt-2">
+                  💡 Get detailed grammar explanations and learning tips for the text
+                </p>
+              </div>
+            )}
+
+            {grammarAnalysisError && (
+              <div className="bg-red-800 border border-red-600 text-red-200 px-4 py-3 rounded max-w-3xl mx-auto mb-6">
+                ❌ Grammar Analysis Error: {grammarAnalysisError}
+              </div>
+            )}
+
+            {/* Grammar Analysis Results */}
+            {grammarAnalysisResult && (
+              <div className="mb-6 max-w-4xl mx-auto">
+                <div className="bg-gray-800 rounded-lg p-6">
+                  <h3 className="text-xl font-bold text-purple-400 mb-4 text-center">
+                    📚 Grammar Analysis Results
+                    <span className="block text-sm font-normal text-gray-400 mt-1">
+                      {grammarAnalysisResult.total_patterns} patterns • {grammarAnalysisResult.learning_points} learning points
+                    </span>
+                  </h3>
+                  
+                  {/* Grammar Patterns */}
+                  {grammarAnalysisResult.grammar_analysis.grammar_patterns.length > 0 && (
+                    <div className="mb-6">
+                      <h4 className="text-lg font-bold text-teal-400 mb-3">🎯 Grammar Patterns Found</h4>
+                      <div className="grid gap-4">
+                        {grammarAnalysisResult.grammar_analysis.grammar_patterns.map((pattern, index) => (
+                          <div key={index} className="bg-gray-700 rounded-lg p-4">
+                            <div className="flex items-center justify-between mb-2">
+                              <h5 className="font-bold text-yellow-400">{pattern.pattern}</h5>
+                              <span className={`px-2 py-1 rounded text-xs ${
+                                pattern.difficulty === 'Beginner' ? 'bg-green-600' :
+                                pattern.difficulty === 'Intermediate' ? 'bg-yellow-600' :
+                                'bg-red-600'
+                              }`}>
+                                {pattern.difficulty}
+                              </span>
+                            </div>
+                            <p className="text-gray-300 mb-3">{pattern.explanation}</p>
+                            <div className="mb-3">
+                              <span className="font-bold text-blue-400 text-sm">Rules:</span>
+                              <ul className="list-disc list-inside text-gray-300 text-sm mt-1">
+                                {pattern.rules.map((rule, ruleIndex) => (
+                                  <li key={ruleIndex}>{rule}</li>
+                                ))}
+                              </ul>
+                            </div>
+                            <div>
+                              <span className="font-bold text-green-400 text-sm">Examples:</span>
+                              <div className="mt-1 space-y-1">
+                                {pattern.examples.map((example, exampleIndex) => (
+                                  <div key={exampleIndex} className="text-gray-300 text-sm italic">
+                                    "{example}"
+                                  </div>
+                                ))}
+                              </div>
+                            </div>
+                          </div>
+                        ))}
+                      </div>
+                    </div>
+                  )}
+
+                  {/* Key Grammar Points */}
+                  {grammarAnalysisResult.grammar_analysis.key_grammar_points.length > 0 && (
+                    <div className="mb-6">
+                      <h4 className="text-lg font-bold text-teal-400 mb-3">💡 Key Learning Points</h4>
+                      <div className="grid gap-4">
+                        {grammarAnalysisResult.grammar_analysis.key_grammar_points.map((point, index) => (
+                          <div key={index} className="bg-gray-700 rounded-lg p-4">
+                            <h5 className="font-bold text-purple-400 mb-2">{point.point}</h5>
+                            <p className="text-gray-300 mb-3">{point.description}</p>
+                            <div className="mb-3">
+                              <span className="font-bold text-blue-400 text-sm">Examples:</span>
+                              <div className="mt-1 space-y-1">
+                                {point.examples.map((example, exampleIndex) => (
+                                  <div key={exampleIndex} className="text-gray-300 text-sm italic">
+                                    "{example}"
+                                  </div>
+                                ))}
+                              </div>
+                            </div>
+                            <div className="bg-blue-600 bg-opacity-20 border border-blue-500 rounded p-3">
+                              <span className="font-bold text-blue-400 text-sm">💡 Learning Tip:</span>
+                              <p className="text-gray-300 text-sm mt-1">{point.learning_tip}</p>
+                            </div>
+                          </div>
+                        ))}
+                      </div>
+                    </div>
+                  )}
+
+                  {/* Learning Recommendations */}
+                  {grammarAnalysisResult.grammar_analysis.learning_recommendations.length > 0 && (
+                    <div className="mb-6">
+                      <h4 className="text-lg font-bold text-teal-400 mb-3">🎯 Learning Recommendations</h4>
+                      <div className="bg-gray-700 rounded-lg p-4">
+                        <ul className="list-disc list-inside space-y-2">
+                          {grammarAnalysisResult.grammar_analysis.learning_recommendations.map((recommendation, index) => (
+                            <li key={index} className="text-gray-300">{recommendation}</li>
+                          ))}
+                        </ul>
+                      </div>
+                    </div>
+                  )}
+
+                  {/* Summary */}
+                  {grammarAnalysisResult.grammar_analysis.summary && (
+                    <div className="bg-gray-700 rounded-lg p-4">
+                      <h4 className="text-lg font-bold text-teal-400 mb-2">📋 Summary</h4>
+                      <p className="text-gray-300">{grammarAnalysisResult.grammar_analysis.summary}</p>
+                    </div>
+                  )}
+                </div>
+              </div>
+            )}
 
             {error && (
               <div className="bg-red-800 border border-red-600 text-red-200 px-4 py-3 rounded max-w-3xl mx-auto mb-6">

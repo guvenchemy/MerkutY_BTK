@@ -224,6 +224,10 @@ class WordExplanationRequest(BaseModel):
     words: List[str]
     username: str
 
+class GrammarAnalysisRequest(BaseModel):
+    text: str
+    username: str
+
 @router.post("/explain")
 async def explain_words(request: WordExplanationRequest) -> Dict:
     """
@@ -290,3 +294,23 @@ async def test_openai_connection() -> Dict:
             "message": str(e),
             "api_key_preview": f"{api_key[:7]}...{api_key[-4:]}" if len(api_key) > 10 else "Invalid format"
         } 
+
+@router.post("/grammar-analysis")
+async def analyze_grammar(request: GrammarAnalysisRequest) -> Dict:
+    """
+    🔍 Grammar Analysis: Analyze text and provide grammar learning insights.
+    Identifies grammar patterns, explains rules, and provides examples.
+    """
+    try:
+        ai_service = AITextAdaptationService()
+        result = ai_service.analyze_grammar(request.text, request.username)
+        
+        if "error" in result:
+            raise HTTPException(status_code=500, detail=result["error"])
+        
+        return result
+        
+    except HTTPException:
+        raise
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Grammar analysis failed: {str(e)}") 

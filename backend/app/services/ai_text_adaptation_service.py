@@ -1,5 +1,5 @@
 import os
-import openai
+import google.generativeai as genai
 from typing import List, Dict, Set
 from sqlalchemy.orm import Session
 from app.core.database import get_db
@@ -20,16 +20,11 @@ class AITextAdaptationService:
     """
     
     def __init__(self):
-        # Get OpenAI API key from environment
-        api_key = os.getenv("OPENAI_API_KEY")
-        
-        # Only use demo mode if no API key is provided
-        self.demo_mode = not api_key or api_key == "demo"
-        
-        if not self.demo_mode:
-            self.client = openai.OpenAI(api_key=api_key)
-        else:
-            self.client = None
+        # Get Gemini API key from environment or use provided key
+        api_key = os.getenv("GEMINI_API_KEY") or "AIzaSyCfkVTk07xkgK3AMHzMOCbaoihGHmopqnE"
+        genai.configure(api_key=api_key)
+        self.client = genai.GenerativeModel('gemini-2.5-flash')
+        self.demo_mode = False
     
     @staticmethod
     def get_user_known_words(username: str, db: Session) -> Set[str]:
@@ -176,23 +171,8 @@ You MUST be extremely aggressive. Use the user's vocabulary list as your primary
                     # Demo mode: provide a simple adaptation
                     adapted_text = self._demo_adaptation(text, known_words, target_unknown_percentage)
                 else:
-                    response = self.client.chat.completions.create(
-                        model="gpt-4o-mini",  # Use GPT-4 for best results
-                        messages=[
-                            {
-                                "role": "system", 
-                                "content": "You are an expert language learning instructor specializing in Stephen Krashen's i+1 hypothesis for optimal language acquisition. You MUST be extremely precise in achieving the target unknown word percentage."
-                            },
-                            {
-                                "role": "user", 
-                                "content": prompt
-                            }
-                        ],
-                        max_tokens=3000,
-                        temperature=0.1  # Very low temperature for maximum consistency
-                    )
-                    
-                    adapted_text = response.choices[0].message.content.strip()
+                    response = self.client.generate_content(prompt)
+                    adapted_text = response.text.strip()
                 
                 # Analyze both texts for comparison
                 from app.services.text_adaptation_service import TextAdaptationService
@@ -945,24 +925,8 @@ Keep explanations simple and beginner-friendly."""
                 }
             
             # Real OpenAI API call
-            response = self.client.chat.completions.create(
-                model="gpt-4o-mini",
-                messages=[
-                    {
-                        "role": "system", 
-                        "content": "You are a helpful language learning tutor who provides clear, simple explanations."
-                    },
-                    {
-                        "role": "user", 
-                        "content": prompt
-                    }
-                ],
-                max_tokens=1500,
-                temperature=0.2
-            )
-            
-            # Parse JSON response
-            explanations_text = response.choices[0].message.content.strip()
+            response = self.client.generate_content(prompt)
+            explanations_text = response.text.strip()
             
             # Clean JSON text (remove markdown formatting if present)
             if explanations_text.startswith('```json'):
@@ -992,4 +956,124 @@ Keep explanations simple and beginner-friendly."""
             return {
                 "error": f"Failed to generate explanations: {str(e)}",
                 "explanations": {}
+            }
+    
+    def analyze_grammar(self, text: str, username: str) -> Dict:
+        """
+        🔍 Grammar Analysis: Analyze text and provide comprehensive grammar learning insights.
+        Identifies grammar patterns, explains rules with examples, and provides learning tips.
+        """
+        try:
+            # Create comprehensive grammar analysis prompt
+            prompt = f"""You are an expert English grammar teacher. Analyze the following text and provide comprehensive grammar insights.
+
+TEXT TO ANALYZE:
+{text}
+
+Please provide a detailed grammar analysis in the following JSON format:
+
+{{
+    "grammar_patterns": [
+        {{
+            "pattern": "Present Perfect Tense",
+            "explanation": "Used for actions that started in the past and continue to the present",
+            "examples": ["I have lived here for 5 years", "She has been working since morning"],
+            "rules": ["Subject + have/has + past participle", "Often used with 'for' and 'since'"],
+            "difficulty": "Intermediate"
+        }}
+    ],
+    "key_grammar_points": [
+        {{
+            "point": "Conditional Sentences",
+            "description": "If-clauses and their different types",
+            "examples": ["If it rains, I will stay home", "If I had money, I would travel"],
+            "learning_tip": "Remember: Type 1 = real possibility, Type 2 = unreal present"
+        }}
+    ],
+    "vocabulary_grammar_connection": [
+        {{
+            "word": "example_word",
+            "grammar_usage": "How this word is used grammatically",
+            "examples": ["Example sentences"]
+        }}
+    ],
+    "learning_recommendations": [
+        "Focus on present perfect vs simple past",
+        "Practice conditional sentences",
+        "Review article usage (a/an/the)"
+    ],
+    "summary": "Brief summary of main grammar points found in the text"
+}}
+
+IMPORTANT:
+- Focus on practical, commonly used grammar patterns
+- Provide clear, simple explanations
+- Include multiple examples for each pattern
+- Identify both basic and advanced grammar structures
+- Give actionable learning tips
+- Keep explanations beginner-friendly but comprehensive
+
+Analyze the text and return the JSON response:"""
+
+            # Call Gemini API
+            try:
+                response = self.client.generate_content(prompt)
+                grammar_analysis_text = response.text.strip()
+                
+                # Clean JSON text (remove markdown formatting if present)
+                if grammar_analysis_text.startswith('```json'):
+                    grammar_analysis_text = grammar_analysis_text.replace('```json', '').replace('```', '').strip()
+                
+                try:
+                    grammar_analysis = json.loads(grammar_analysis_text)
+                except json.JSONDecodeError:
+                    # Fallback if JSON parsing fails
+                    logger.error(f"Failed to parse grammar analysis JSON: {grammar_analysis_text}")
+                    grammar_analysis = {
+                        "grammar_patterns": [
+                            {
+                                "pattern": "Basic Sentence Structure",
+                                "explanation": "Subject + Verb + Object pattern",
+                                "examples": ["I love English", "She reads books"],
+                                "rules": ["Every sentence needs a subject and verb"],
+                                "difficulty": "Beginner"
+                            }
+                        ],
+                        "key_grammar_points": [
+                            {
+                                "point": "Sentence Structure",
+                                "description": "Basic English sentence patterns",
+                                "examples": ["Subject + Verb + Object"],
+                                "learning_tip": "Start with simple sentences, then add complexity"
+                            }
+                        ],
+                        "vocabulary_grammar_connection": [],
+                        "learning_recommendations": [
+                            "Practice basic sentence structure",
+                            "Learn common verb forms",
+                            "Study article usage"
+                        ],
+                        "summary": "Basic grammar analysis - focus on sentence structure and verb forms"
+                    }
+                
+                return {
+                    "grammar_analysis": grammar_analysis,
+                    "original_text": text,
+                    "analysis_type": "comprehensive_grammar",
+                    "total_patterns": len(grammar_analysis.get("grammar_patterns", [])),
+                    "learning_points": len(grammar_analysis.get("key_grammar_points", []))
+                }
+                
+            except Exception as e:
+                logger.error(f"Error calling Gemini API for grammar analysis: {e}")
+                return {
+                    "error": f"Failed to analyze grammar: {str(e)}",
+                    "grammar_analysis": {}
+                }
+                
+        except Exception as e:
+            logger.error(f"Error in grammar analysis: {e}")
+            return {
+                "error": f"Grammar analysis failed: {str(e)}",
+                "grammar_analysis": {}
             } 
