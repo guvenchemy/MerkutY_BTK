@@ -2,6 +2,7 @@
 
 import { useState, useEffect } from 'react';
 import VocabularyUpload from '../components/VocabularyUpload';
+import TextAnalysis from '../components/TextAnalysis';
 
 // Types for our API responses
 interface UserStats {
@@ -127,6 +128,9 @@ export default function Home() {
   
   // Settings State
   const [targetUnknownPercentage, setTargetUnknownPercentage] = useState(10);
+
+  // Tab State
+  const [activeTab, setActiveTab] = useState<'adaptation' | 'analysis'>('adaptation');
 
   // Grammar Analysis State
   const [grammarAnalysisResult, setGrammarAnalysisResult] = useState<GrammarAnalysisResult | null>(null);
@@ -550,6 +554,35 @@ export default function Home() {
         {/* Main App Content - Only show when logged in */}
         {isLoggedIn && (
           <>
+            {/* Tab Navigation */}
+            <div className="mb-6">
+              <div className="flex justify-center border-b border-gray-700">
+                <button
+                  onClick={() => setActiveTab('adaptation')}
+                  className={`px-6 py-3 font-medium text-sm transition-colors ${
+                    activeTab === 'adaptation'
+                      ? 'text-teal-400 border-b-2 border-teal-400'
+                      : 'text-gray-400 hover:text-gray-200'
+                  }`}
+                >
+                  📚 Metin Adaptasyonu
+                </button>
+                <button
+                  onClick={() => setActiveTab('analysis')}
+                  className={`px-6 py-3 font-medium text-sm transition-colors ${
+                    activeTab === 'analysis'
+                      ? 'text-teal-400 border-b-2 border-teal-400'
+                      : 'text-gray-400 hover:text-gray-200'
+                  }`}
+                >
+                  🔍 Metin Analizi
+                </button>
+              </div>
+            </div>
+
+            {/* Tab Content */}
+            {activeTab === 'adaptation' && (
+              <div>
             {userStats && (
               <div className="mt-4 bg-gray-800 rounded-lg p-4 max-w-4xl mx-auto">
                 <div className="flex flex-wrap justify-center gap-4 text-sm mb-3">
@@ -943,6 +976,15 @@ export default function Home() {
                     </div>
                   )}
                 </div>
+              </div>
+            )}
+              </div>
+            )}
+            
+            {/* Text Analysis Tab */}
+            {activeTab === 'analysis' && (
+              <div className="bg-gray-900">
+                <TextAnalysis />
               </div>
             )}
           </>

@@ -116,7 +116,30 @@ npm run dev
 DATABASE_URL=postgresql://localhost/nexus_db
 SECRET_KEY=your-secret-key-here
 OPENAI_API_KEY=your-openai-api-key-here
+GOOGLE_API_KEY=your-google-gemini-api-key-here
 ```
+
+## ✨ Özellikler
+
+### 🎯 Metin Adaptasyonu
+- YouTube videolarından transkript çıkarma
+- Kişisel kelime hazinesine göre metin adaptasyonu
+- i+1 metoduna uygun zorluk seviyesi ayarlama
+- Kelime öğrenme takibi
+
+### 🔍 Metin Analizi (YENİ!)
+- **Temel İstatistikler**: Kelime sayısı, cümle sayısı, okuma süresi
+- **Gramer Analizi**: 
+  - Zaman formları (Present, Past, Future, Present Perfect)
+  - Modal fiiller (can, could, must, should, vb.)
+  - Şartlı cümleler (if-clauses)
+  - Edilgen çatı (Passive Voice)
+  - İlgi zamirli cümleler (Relative Clauses)
+  - Karşılaştırma ifadeleri (Comparatives & Superlatives)
+- **Kelime Analizi**: Kelime çeşitliliği, sık kullanılan kelimeler
+- **AI Değerlendirmesi**: Gemini AI ile dil seviyesi ve öğrenme önerileri
+- **YouTube Desteği**: Video transkriptlerinin otomatik analizi
+- **Gramer Örnekleri**: Her gramer yapısı için metinden çıkarılan örnekler ve açıklamalar
 
 ## 🚨 Önemli Notlar
 
@@ -125,6 +148,22 @@ OPENAI_API_KEY=your-openai-api-key-here
 3. **Virtual Environment**: Her zaman aktif olmalı
 4. **Port Çakışması**: 8000 portu kullanılıyorsa 8001, 8002 dene
 5. **YouTube API**: IP engeli olabilir, normal
+6. **Metin Analizi**: Gemini API için GOOGLE_API_KEY gerekli
+7. **spaCy Modeli**: Detaylı gramer analizi için `python -m spacy download en_core_web_sm`
+
+## 🎯 Metin Analizi Kullanımı
+
+### API Endpoints:
+- `POST /api/analysis/analyze-text` - Metin analizi
+- `POST /api/analysis/analyze-youtube` - YouTube video analizi
+- `GET /api/analysis/analysis-info` - Özellik bilgileri
+
+### Örnek Kullanım:
+```bash
+curl -X POST "http://localhost:8000/api/analysis/analyze-text" \
+  -H "Content-Type: application/json" \
+  -d '{"text": "Your text here", "include_examples": true}'
+```
 
 ## 📞 Yardım
 

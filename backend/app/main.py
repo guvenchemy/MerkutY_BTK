@@ -1,6 +1,6 @@
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
-from app.api.endpoints import transcripts, vocabulary, text_adaptation, auth
+from app.api.endpoints import transcripts, vocabulary, text_adaptation, auth, text_analysis
 from dotenv import load_dotenv
 import os
 
@@ -27,6 +27,7 @@ app.include_router(auth.router, prefix="/api/auth", tags=["authentication"])
 app.include_router(transcripts.router, prefix="/api", tags=["transcripts"])
 app.include_router(vocabulary.router, prefix="/api/vocabulary", tags=["vocabulary"])
 app.include_router(text_adaptation.router, prefix="/api/adaptation", tags=["text-adaptation"])
+app.include_router(text_analysis.router, prefix="/api/analysis", tags=["text-analysis"])
 
 @app.get("/")
 def read_root():
