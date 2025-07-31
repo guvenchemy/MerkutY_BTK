@@ -18,6 +18,7 @@ class User(Base):
     # Relationships
     vocabularies = relationship("UserVocabulary", back_populates="user")
     unknown_words = relationship("UnknownWord", back_populates="user")
+    grammar_knowledge = relationship("UserGrammarKnowledge", back_populates="user")
 
 class Vocabulary(Base):
     __tablename__ = "vocabularies"
@@ -38,8 +39,10 @@ class UserVocabulary(Base):
     user_id = Column(Integer, ForeignKey("users.id"), nullable=False)
     vocabulary_id = Column(Integer, ForeignKey("vocabularies.id"), nullable=False)
     is_known = Column(Boolean, default=True)  # Does user know this word?
-    status = Column(String(20), default="known")  # 'known', 'unknown', 'ignore'
+    status = Column(String(20), default="known")  # 'known', 'unknown', 'ignored', 'learning'
     confidence_level = Column(Integer, default=3)  # 1-5 confidence scale
+    translation = Column(Text, nullable=True)  # User's preferred translation
+    learned_at = Column(DateTime(timezone=True), nullable=True)  # When user learned this word
     created_at = Column(DateTime(timezone=True), server_default=func.now())
     updated_at = Column(DateTime(timezone=True), onupdate=func.now())
     
@@ -56,4 +59,31 @@ class ProcessedTranscript(Base):
     original_text = Column(Text, nullable=False)
     language = Column(String(10), default="en", nullable=False)
     word_count = Column(Integer, default=0)
+    created_at = Column(DateTime(timezone=True), server_default=func.now())
+
+# Model for tracking user's grammar pattern knowledge
+class UserGrammarKnowledge(Base):
+    __tablename__ = "user_grammar_knowledge"
+    
+    id = Column(Integer, primary_key=True, index=True)
+    user_id = Column(Integer, ForeignKey("users.id"), nullable=False)
+    grammar_pattern = Column(String(100), nullable=False)  # e.g., "present_perfect", "passive_voice"
+    status = Column(String(20), default="unknown")  # "known", "unknown", "ignored"
+    created_at = Column(DateTime(timezone=True), server_default=func.now())
+    updated_at = Column(DateTime(timezone=True), onupdate=func.now())
+    
+    # Relationships
+    user = relationship("User", back_populates="grammar_knowledge")
+
+# Grammar pattern definitions
+class GrammarPattern(Base):
+    __tablename__ = "grammar_patterns"
+    
+    id = Column(Integer, primary_key=True, index=True)
+    pattern_name = Column(String(100), unique=True, nullable=False)
+    pattern_key = Column(String(50), unique=True, nullable=False)  # Machine readable key
+    description_turkish = Column(Text, nullable=False)  # Turkish explanation
+    description_english = Column(Text, nullable=False)  # English explanation
+    difficulty_level = Column(Integer, default=1)  # 1-10 scale
+    category = Column(String(50), nullable=False)  # e.g., "tenses", "voice", "conditionals"
     created_at = Column(DateTime(timezone=True), server_default=func.now()) 

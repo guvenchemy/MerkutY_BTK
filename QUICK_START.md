@@ -1,4 +1,4 @@
-# 🚀 Hızlı Başlangıç Rehberi
+# 🚀 Hızlı Başlangıç Rehberi - MerkutY BTK
 
 ## 1. Sistemi Kur
 ```bash
@@ -23,12 +23,14 @@ alembic upgrade head
 nano backend/.env
 ```
 
-Şunları ekle:
+**ÖNEMLİ:** Şunları ekle:
 ```env
 DATABASE_URL=postgresql://localhost/nexus_db
 SECRET_KEY=your-secret-key-here
-OPENAI_API_KEY=your-openai-api-key-here
+GOOGLE_API_KEY=your-google-gemini-api-key-here
 ```
+
+> **Not:** GOOGLE_API_KEY olmadan metin analizi çalışmaz!
 
 ## 4. Sistemi Başlat
 ```bash

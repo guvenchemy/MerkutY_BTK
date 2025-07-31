@@ -23,7 +23,7 @@ class AITextAdaptationService:
         # Get Gemini API key from environment or use provided key
         api_key = os.getenv("GEMINI_API_KEY") or "AIzaSyCfkVTk07xkgK3AMHzMOCbaoihGHmopqnE"
         genai.configure(api_key=api_key)
-        self.client = genai.GenerativeModel('gemini-2.5-flash')
+        self.client = genai.GenerativeModel('gemini-1.5-flash')
         self.demo_mode = False
     
     @staticmethod

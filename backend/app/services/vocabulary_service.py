@@ -88,6 +88,105 @@ class VocabularyService:
         return vocabulary_objects
     
     @staticmethod
+    def add_user_vocabulary_with_translation(
+        db: Session, 
+        user_id: int, 
+        word: str, 
+        translation: str, 
+        status: str = "unknown"
+    ) -> bool:
+        """
+        Kullanıcıya kelime ve çevirisini ekler
+        status: 'known', 'unknown', 'ignored', 'learning'
+        """
+        try:
+            print(f"🔍 VocabularyService: Adding word '{word}' for user {user_id} with status '{status}'")
+            
+            # Kelimeyi temizle
+            clean_word = word.strip().lower()
+            
+            if not clean_word:
+                print(f"❌ Clean word is empty")
+                return False
+            
+            # Vocabulary tablosuna ekle (yoksa)
+            vocab = db.query(Vocabulary).filter(
+                Vocabulary.word == clean_word,
+                Vocabulary.language == "en"
+            ).first()
+            
+            if not vocab:
+                print(f"🔍 Creating new vocabulary entry for '{clean_word}'")
+                vocab = Vocabulary(
+                    word=clean_word,
+                    language="en",
+                    difficulty_level=VocabularyService._estimate_difficulty(clean_word)
+                )
+                db.add(vocab)
+                db.flush()  # ID'yi al
+                print(f"🔍 Created vocabulary with ID: {vocab.id}")
+            else:
+                print(f"🔍 Found existing vocabulary with ID: {vocab.id}")
+            
+            # UserVocabulary tablosuna ekle/güncelle
+            user_vocab = db.query(UserVocabulary).filter(
+                UserVocabulary.user_id == user_id,
+                UserVocabulary.vocabulary_id == vocab.id
+            ).first()
+            
+            if user_vocab:
+                print(f"🔍 Updating existing user vocabulary")
+                # Mevcut kayıt varsa güncelle
+                user_vocab.status = status
+                user_vocab.translation = translation
+            else:
+                print(f"🔍 Creating new user vocabulary")
+                # Yeni kayıt oluştur
+                user_vocab = UserVocabulary(
+                    user_id=user_id,
+                    vocabulary_id=vocab.id,
+                    status=status,
+                    translation=translation,
+                    learned_at=None  # İlk öğrenme tarihi
+                )
+                db.add(user_vocab)
+            
+            db.commit()
+            print(f"✅ Successfully added vocabulary")
+            return True
+            
+        except Exception as e:
+            db.rollback()
+            print(f"❌ Vocabulary add error: {str(e)}")
+            print(f"❌ Error type: {type(e)}")
+            import traceback
+            print(f"❌ Traceback: {traceback.format_exc()}")
+            return False
+    
+    @staticmethod
+    def get_user_known_words(db: Session, user_id: int) -> List[str]:
+        """
+        Kullanıcının bilinen kelimelerini döner
+        """
+        try:
+            # Known ve learning status'taki kelimeleri al
+            user_vocabs = db.query(UserVocabulary).join(Vocabulary).filter(
+                UserVocabulary.user_id == user_id,
+                UserVocabulary.status.in_(['known', 'learning'])
+            ).all()
+            
+            known_words = []
+            for user_vocab in user_vocabs:
+                if user_vocab.vocabulary:
+                    known_words.append(user_vocab.vocabulary.word)
+            
+            return known_words
+            
+        except Exception as e:
+            print(f"❌ Get known words error: {str(e)}")
+            return []
+    
+    @staticmethod
     def assign_vocabulary_to_user(db: Session, user: User, vocabularies: List[Vocabulary]) -> int:
         """
         Assign vocabulary words to a user as 'known' words
