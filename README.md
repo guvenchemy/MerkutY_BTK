@@ -1,5 +1,7 @@
 # Nexus - AI-Powered Language Learning Platform
 
+> **Not:** Bu proje veritabanı olarak **PostgreSQL** kullanır.
+
 ## 🚀 Hızlı Kurulum (Arkadaşlar İçin)
 
 ### Ön Gereksinimler
@@ -95,6 +97,8 @@ npm run dev
 - `frontend/src/app/page.tsx` - Ana sayfa
 
 ## 🗄️ Database Yapısı
+
+> **Kullanılan veritabanı:** PostgreSQL
 
 ### Tablolar:
 - **users**: Kullanıcı bilgileri
