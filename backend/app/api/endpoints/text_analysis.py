@@ -3,7 +3,7 @@ from pydantic import BaseModel
 from typing import Dict, Any, Optional
 from sqlalchemy.orm import Session
 from app.services.text_analysis_service import TextAnalysisService
-from app.services.youtube_service import YouTubeService
+from app.services.yt_dlp_service import YTDlpService
 from app.services.grammar_service import GrammarService
 from app.services.vocabulary_service import VocabularyService
 from app.core.database import get_db
@@ -15,6 +15,7 @@ class TextAnalysisRequest(BaseModel):
     include_examples: bool = True
     include_adaptation: bool = False
     user_id: Optional[int] = None  # Opsiyonel user tracking
+    username: Optional[str] = None  # Username for user-specific analysis
 
 class YouTubeAnalysisRequest(BaseModel):
     video_url: str
@@ -54,24 +55,30 @@ def get_text_analysis_service():
     return TextAnalysisService()
 
 def get_youtube_service():
-    return YouTubeService()
+    return YTDlpService()
 
-@router.post("/analyze-text", response_model=AnalysisResponse)
+@router.post("/analyze", response_model=AnalysisResponse)
 async def analyze_text(
     request: TextAnalysisRequest,
     text_service: TextAnalysisService = Depends(get_text_analysis_service),
     db: Session = Depends(get_db)
 ):
     """
-    Verilen metni analiz eder ve gramer bilgileri döner
-    Kullanıcı bilinen gramer kalıplarını filtreler
+    Verilen metni analiz eder ve kullanıcıya özel kelime analizi yapar
     """
     try:
         if not request.text or len(request.text.strip()) < 10:
             raise HTTPException(status_code=400, detail="Text must be at least 10 characters long")
         
-        # Geçici user_id oluştur (gerçek auth sistemi yoksa)
+        # Username varsa user_id'yi bul
         user_id = request.user_id
+        if request.username and not user_id:
+            from app.models.user_vocabulary import User
+            user = db.query(User).filter(User.username == request.username).first()
+            if user:
+                user_id = user.id
+        
+        # Geçici user_id oluştur (gerçek auth sistemi yoksa)
         if not user_id:
             user_id = GrammarService.create_or_get_user_by_session(db, "temp_session")
         
@@ -110,7 +117,7 @@ async def analyze_text(
 async def analyze_youtube_transcript(
     request: YouTubeAnalysisRequest,
     text_service: TextAnalysisService = Depends(get_text_analysis_service),
-    youtube_service: YouTubeService = Depends(get_youtube_service)
+    youtube_service: YTDlpService = Depends(get_youtube_service)
 ):
     """
     YouTube videosunun transkriptini alır ve analiz eder - IP block bypass ile
@@ -198,7 +205,7 @@ async def get_youtube_bypass_help():
     """
     YouTube IP block'u aşma yöntemleri ve çalışan video örnekleri
     """
-    youtube_service = YouTubeService()
+    youtube_service = YTDlpService()
     
     return {
         "ip_block_solutions": {
@@ -237,7 +244,7 @@ async def test_youtube_connection():
     """
     YouTube bağlantısını test eder
     """
-    youtube_service = YouTubeService()
+    youtube_service = YTDlpService()
     test_video_id = "dQw4w9WgXcQ"  # Test video
     
     try:

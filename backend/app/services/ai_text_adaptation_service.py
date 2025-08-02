@@ -24,7 +24,7 @@ class AITextAdaptationService:
         api_key = os.getenv("GEMINI_API_KEY") or "AIzaSyCfkVTk07xkgK3AMHzMOCbaoihGHmopqnE"
         genai.configure(api_key=api_key)
         self.client = genai.GenerativeModel('gemini-1.5-flash')
-        self.demo_mode = False
+        self.demo_mode = True  # Use demo mode for now
     
     @staticmethod
     def get_user_known_words(username: str, db: Session) -> Set[str]:
@@ -848,16 +848,19 @@ You MUST be extremely aggressive. Use the user's vocabulary list as your primary
         """
         try:
             # Import YouTube service
-            from app.services.youtube_service import get_video_id, get_transcript
+            from app.services.yt_dlp_service import YTDlpService
             
             # Extract video ID and get transcript
-            video_id = get_video_id(youtube_url)
+            youtube_service = YTDlpService()
+            video_id = youtube_service.get_video_id(youtube_url)
             if not video_id:
                 return {"error": "Invalid YouTube URL"}
             
-            transcript = get_transcript(video_id)
-            if not transcript:
-                return {"error": "Transcript not found for this video"}
+            transcript_result = youtube_service.get_transcript(video_id)
+            if not transcript_result.get("success"):
+                return {"error": f"Transcript not found: {transcript_result.get('error', 'Unknown error')}"}
+            
+            transcript = transcript_result["transcript"]
             
             # Adapt transcript with AI
             adaptation_result = self.adapt_text_with_ai(transcript, username, target_unknown_percentage)

@@ -1,6 +1,7 @@
 'use client';
 
 import { useState, useEffect } from 'react';
+import { useRouter } from 'next/navigation';
 import VocabularyUpload from '../components/VocabularyUpload';
 import TextAnalysis from '../components/TextAnalysis';
 
@@ -99,10 +100,13 @@ interface GrammarAnalysisResult {
 }
 
 export default function Home() {
+  const router = useRouter();
+  
   // Authentication State
   const [isLoggedIn, setIsLoggedIn] = useState(false);
   const [loginUsername, setLoginUsername] = useState('');
   const [showLoginForm, setShowLoginForm] = useState(true);
+  const [user, setUser] = useState<any>(null);
   
   // User Management State
   const [currentUser, setCurrentUser] = useState('');
@@ -151,6 +155,14 @@ export default function Home() {
   };
 
   const handleLogout = () => {
+    // Clear localStorage
+    localStorage.removeItem('token');
+    localStorage.removeItem('user');
+    localStorage.removeItem('originalText');
+    localStorage.removeItem('adaptedText');
+    localStorage.removeItem('youtubeUrl');
+    
+    // Reset state
     setCurrentUser('');
     setIsLoggedIn(false);
     setShowLoginForm(true);
@@ -158,7 +170,45 @@ export default function Home() {
     setOriginalText('');
     setAdaptedText('');
     setAdaptationResult(null);
+    setUser(null);
+    setUrl('');
+    setError('');
+    setIsLoading(false);
+    
+    // Redirect to login
+    router.push('/login');
   };
+
+  // Check authentication on component mount
+  useEffect(() => {
+    const token = localStorage.getItem('token');
+    const userData = localStorage.getItem('user');
+    
+    if (token && userData) {
+      try {
+        const user = JSON.parse(userData);
+        setUser(user);
+        setCurrentUser(user.username);
+        setIsLoggedIn(true);
+        setShowLoginForm(false);
+        
+        // Clear state on refresh - don't restore from localStorage
+        setOriginalText('');
+        setAdaptedText('');
+        setUrl('');
+        setAdaptationResult(null);
+        setError('');
+        setIsLoading(false);
+        
+      } catch (err) {
+        console.error('Error parsing user data:', err);
+        handleLogout();
+      }
+    } else {
+      // Redirect to login if not authenticated
+      router.push('/login');
+    }
+  }, [router]);
 
   // Load user stats on component mount
   useEffect(() => {
@@ -169,10 +219,19 @@ export default function Home() {
 
   const loadUserStats = async () => {
     try {
-      const response = await fetch(`http://localhost:8000/api/adaptation/user-stats/${currentUser}`);
+      const token = localStorage.getItem('token');
+      const response = await fetch(`http://localhost:8000/api/adaptation/user-stats/${currentUser}`, {
+        headers: {
+          'Authorization': `Bearer ${token}`,
+          'Content-Type': 'application/json',
+        },
+      });
       if (response.ok) {
         const stats = await response.json();
         setUserStats(stats);
+      } else if (response.status === 401) {
+        // Unauthorized, redirect to login
+        handleLogout();
       }
     } catch (err) {
       console.error('Failed to load user stats:', err);
@@ -194,29 +253,143 @@ export default function Home() {
     }
 
     try {
-      const endpoint = '/api/adaptation/youtube';
-      const response = await fetch(`http://localhost:8000${endpoint}`, {
+      const token = localStorage.getItem('token');
+      
+      // Use library endpoint to get or create transcript
+      const response = await fetch(`http://localhost:8000/api/library/transcript`, {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
+          'Authorization': `Bearer ${token}`,
         },
         body: JSON.stringify({ 
-          youtube_url: url, 
-          username: currentUser,
-          target_unknown_percentage: targetUnknownPercentage
+          video_url: url, 
+          username: currentUser
         }),
       });
 
       if (!response.ok) {
         const errorData = await response.json();
-        throw new Error(errorData.detail || 'Failed to process video.');
+        throw new Error(errorData.error || 'Failed to process video.');
       }
 
       const data = await response.json();
       
-      setOriginalText(data.original_transcript || data.original_text);
-      setAdaptedText(data.adapted_text);
-      setAdaptationResult(data);
+      if (!data.success) {
+        throw new Error(data.error || 'Failed to process video.');
+      }
+
+      const transcriptData = data.data;
+      
+      setOriginalText(transcriptData.original_text);
+      
+      // If this is a new transcript (not from library), create AI adaptation
+      let adaptedText = transcriptData.adapted_text || '';
+      if (!transcriptData.from_library) {
+        try {
+          // Create AI adaptation for new transcript using the library adaptation endpoint
+          const adaptResponse = await fetch(`http://localhost:8000/api/library/transcript/${transcriptData.video_id}/adapt?username=${currentUser}`, {
+            method: 'POST',
+            headers: {
+              'Authorization': `Bearer ${token}`,
+              'Content-Type': 'application/json',
+            },
+          });
+          
+          if (adaptResponse.ok) {
+            const adaptData = await adaptResponse.json();
+            if (adaptData.success) {
+              adaptedText = adaptData.data.adapted_text;
+            }
+          }
+        } catch (error) {
+          console.error('Failed to create AI adaptation:', error);
+        }
+      }
+      
+      setAdaptedText(adaptedText);
+      
+      // Save to localStorage
+      localStorage.setItem('originalText', transcriptData.original_text);
+      localStorage.setItem('adaptedText', adaptedText);
+      localStorage.setItem('youtubeUrl', url);
+      
+      // Create adaptation result object for compatibility
+      const adaptationResult = {
+        original_text: transcriptData.original_text,
+        adapted_text: adaptedText,
+        original_analysis: {
+          total_words: transcriptData.word_count || 0,
+          known_words: 0,
+          unknown_words: 0,
+          known_percentage: 0,
+          unknown_percentage: 0,
+          difficulty_level: 'unknown'
+        },
+        adapted_analysis: {
+          total_words: adaptedText ? adaptedText.split(' ').length : 0,
+          known_words: 0,
+          unknown_words: 0,
+          known_percentage: 0,
+          unknown_percentage: 0,
+          difficulty_level: 'unknown'
+        },
+        user_vocabulary_size: 0,
+        adaptation_method: transcriptData.from_library ? 'library' : 'gemini',
+        improvement: {
+          unknown_percentage_change: 0,
+          closer_to_target: false
+        }
+      };
+      
+      setAdaptationResult(adaptationResult);
+      
+      // Perform word analysis for the original text
+      try {
+        const analysisResponse = await fetch(`http://localhost:8000/api/text-analysis/analyze`, {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+            'Authorization': `Bearer ${token}`,
+          },
+          body: JSON.stringify({
+            text: transcriptData.original_text,
+            username: currentUser
+          }),
+        });
+        
+        if (analysisResponse.ok) {
+          const analysisData = await analysisResponse.json();
+          if (analysisData.success) {
+            // Update adaptation result with word analysis
+            const updatedResult = {
+              ...adaptationResult,
+              original_word_analysis: analysisData.data.word_analysis,
+              original_analysis: {
+                total_words: analysisData.data.analysis?.total_unique_words_in_text || 0,
+                known_words: analysisData.data.analysis?.known_words_in_text || 0,
+                unknown_words: analysisData.data.analysis?.unknown_words_in_text || 0,
+                known_percentage: analysisData.data.analysis?.known_percentage || 0,
+                unknown_percentage: analysisData.data.analysis?.unknown_percentage || 0,
+                difficulty_level: analysisData.data.analysis?.text_difficulty || 'unknown'
+              }
+            };
+            setAdaptationResult(updatedResult);
+            
+            // Also reload word analysis to ensure proper display
+            setTimeout(() => {
+              reloadWordAnalysis();
+            }, 1000);
+          }
+        }
+      } catch (error) {
+        console.error('Failed to analyze words:', error);
+      }
+      
+      // Show success message if from library
+      if (transcriptData.from_library) {
+        setError('✅ Bu video kütüphaneden getirildi! Yeni transcript işlenmedi.');
+      }
       
     } catch (err: any) {
       setError(err.message);
@@ -246,38 +419,76 @@ export default function Home() {
   };
 
   const reloadWordAnalysis = async () => {
-    if (!adaptationResult || !originalText) return;
+    if (!originalText) return;
     
     try {
-      // Re-analyze both original and adapted texts with updated vocabulary
-      const originalAnalysisResponse = await fetch('http://localhost:8000/api/adaptation/analyze', {
+      const token = localStorage.getItem('token');
+      
+      // Re-analyze original text with updated vocabulary
+      const originalAnalysisResponse = await fetch('http://localhost:8000/api/text-analysis/analyze', {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
+        headers: { 
+          'Content-Type': 'application/json',
+          'Authorization': `Bearer ${token}`,
+        },
         body: JSON.stringify({
           text: originalText,
           username: currentUser
         }),
       });
       
-      const adaptedAnalysisResponse = await fetch('http://localhost:8000/api/adaptation/analyze', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          text: adaptationResult.adapted_text,
-          username: currentUser
-        }),
-      });
-      
-      if (originalAnalysisResponse.ok && adaptedAnalysisResponse.ok) {
+      if (originalAnalysisResponse.ok) {
         const originalAnalysisData = await originalAnalysisResponse.json();
-        const adaptedAnalysisData = await adaptedAnalysisResponse.json();
         
-        // Update adaptation result with new word analysis for both texts
-        setAdaptationResult(prev => prev ? {
-          ...prev,
-          original_word_analysis: originalAnalysisData.word_analysis,
-          adapted_word_analysis: adaptedAnalysisData.word_analysis
-        } : null);
+        if (originalAnalysisData.success) {
+          // Update adaptation result with new word analysis
+          setAdaptationResult(prev => prev ? {
+            ...prev,
+            original_word_analysis: originalAnalysisData.data.word_analysis,
+            original_analysis: {
+              total_words: originalAnalysisData.data.analysis?.total_unique_words_in_text || 0,
+              known_words: originalAnalysisData.data.analysis?.known_words_in_text || 0,
+              unknown_words: originalAnalysisData.data.analysis?.unknown_words_in_text || 0,
+              known_percentage: originalAnalysisData.data.analysis?.known_percentage || 0,
+              unknown_percentage: originalAnalysisData.data.analysis?.unknown_percentage || 0,
+              difficulty_level: originalAnalysisData.data.analysis?.text_difficulty || 'unknown'
+            }
+          } : null);
+        }
+      }
+      
+      // If we have adapted text, also analyze it
+      if (adaptedText) {
+        const adaptedAnalysisResponse = await fetch('http://localhost:8000/api/text-analysis/analyze', {
+          method: 'POST',
+          headers: { 
+            'Content-Type': 'application/json',
+            'Authorization': `Bearer ${token}`,
+          },
+          body: JSON.stringify({
+            text: adaptedText,
+            username: currentUser
+          }),
+        });
+        
+        if (adaptedAnalysisResponse.ok) {
+          const adaptedAnalysisData = await adaptedAnalysisResponse.json();
+          
+          if (adaptedAnalysisData.success) {
+            setAdaptationResult(prev => prev ? {
+              ...prev,
+              adapted_word_analysis: adaptedAnalysisData.data.word_analysis,
+              adapted_analysis: {
+                total_words: adaptedAnalysisData.data.analysis?.total_unique_words_in_text || 0,
+                known_words: adaptedAnalysisData.data.analysis?.known_words_in_text || 0,
+                unknown_words: adaptedAnalysisData.data.analysis?.unknown_words_in_text || 0,
+                known_percentage: adaptedAnalysisData.data.analysis?.known_percentage || 0,
+                unknown_percentage: adaptedAnalysisData.data.analysis?.unknown_percentage || 0,
+                difficulty_level: adaptedAnalysisData.data.analysis?.text_difficulty || 'unknown'
+              }
+            } : null);
+          }
+        }
       }
     } catch (analysisErr) {
       console.error('Failed to reload word analysis:', analysisErr);
@@ -420,17 +631,13 @@ export default function Home() {
   };
 
   const isWordKnown = (word: string, wordAnalysis?: { word_status: { [key: string]: boolean } }): boolean => {
-    if (!wordAnalysis) {
-      // Fallback to userStats if no word analysis available
-      if (!userStats) return true;
-      const cleanWord = word.toLowerCase();
-      return userStats.known_words_sample.some(knownWord => 
-        knownWord.toLowerCase() === cleanWord
-      );
+    if (!wordAnalysis || !wordAnalysis.word_status) {
+      // If no word analysis available, assume unknown (safer approach)
+      return false;
     }
     
-    const cleanWord = word.toLowerCase();
-    return wordAnalysis.word_status[cleanWord] || false;
+    const cleanWord = word.toLowerCase().trim();
+    return wordAnalysis.word_status[cleanWord] === true;
   };
 
   const renderClickableText = (text: string, isAdapted: boolean = false, wordAnalysis?: { word_status: { [key: string]: boolean } }) => {
@@ -450,10 +657,10 @@ export default function Home() {
             return <span key={index}>{part}</span>;
           }
           
-          const cleanWord = part.toLowerCase();
+          const cleanWord = part.toLowerCase().trim();
           const known = isWordKnown(cleanWord, wordAnalysis);
           
-          // Color coding based on knowledge
+          // Color coding based on knowledge - only color unknown words
           let wordClass = "cursor-pointer px-1 rounded transition-colors duration-200 ";
           
           if (isAdapted) {
@@ -502,6 +709,12 @@ export default function Home() {
             {isLoggedIn ? (
               <div className="flex items-center justify-center gap-4">
                 <span className="text-teal-400 font-bold">👤 {currentUser}</span>
+                <button
+                  onClick={() => router.push('/library')}
+                  className="bg-blue-600 hover:bg-blue-700 text-white px-4 py-2 rounded-lg text-sm"
+                >
+                  📚 Kütüphane
+                </button>
                 <button
                   onClick={handleLogout}
                   className="bg-red-600 hover:bg-red-700 text-white px-4 py-2 rounded-lg text-sm"
@@ -847,17 +1060,17 @@ export default function Home() {
                   <div className="grid grid-cols-2 md:grid-cols-4 gap-4 text-sm">
                     <div className="bg-gray-700 p-3 rounded">
                       <div className="font-bold text-red-400">Original</div>
-                      <div>{adaptationResult.original_analysis.unknown_percentage.toFixed(1)}% unknown</div>
+                      <div>{(adaptationResult.original_analysis?.unknown_percentage || 0).toFixed(1)}% unknown</div>
                       <div className="text-xs text-gray-400">{adaptationResult.original_analysis.difficulty_level}</div>
                     </div>
                     <div className="bg-gray-700 p-3 rounded">
                       <div className="font-bold text-green-400">Adapted</div>
-                      <div>{adaptationResult.adapted_analysis.unknown_percentage.toFixed(1)}% unknown</div>
+                      <div>{(adaptationResult.adapted_analysis?.unknown_percentage || 0).toFixed(1)}% unknown</div>
                       <div className="text-xs text-gray-400">{adaptationResult.adapted_analysis.difficulty_level}</div>
                     </div>
                     <div className="bg-gray-700 p-3 rounded">
                       <div className="font-bold text-blue-400">Improvement</div>
-                      <div>{adaptationResult.improvement.unknown_percentage_change.toFixed(1)}% change</div>
+                      <div>{(adaptationResult.improvement?.unknown_percentage_change || 0).toFixed(1)}% change</div>
                       <div className="text-xs text-gray-400">
                         {adaptationResult.improvement.closer_to_target ? '✅ Better' : '❌ Needs work'}
                       </div>
@@ -879,7 +1092,7 @@ export default function Home() {
                     📝 Original Text
                     {adaptationResult && (
                       <span className="block text-sm font-normal text-red-400 mt-1">
-                        {adaptationResult.original_analysis.unknown_percentage.toFixed(1)}% unknown words
+                        {(adaptationResult.original_analysis?.unknown_percentage || 0).toFixed(1)}% unknown words
                       </span>
                     )}
                   </h2>
@@ -893,7 +1106,7 @@ export default function Home() {
                     🎯 i+1 Adapted Text
                     {adaptationResult && (
                       <span className="block text-sm font-normal text-green-400 mt-1">
-                        {adaptationResult.adapted_analysis.unknown_percentage.toFixed(1)}% unknown words
+                        {(adaptationResult.adapted_analysis?.unknown_percentage || 0).toFixed(1)}% unknown words
                       </span>
                     )}
                   </h2>

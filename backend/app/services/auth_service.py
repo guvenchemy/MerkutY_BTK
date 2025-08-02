@@ -159,7 +159,8 @@ class AuthService:
                 "id": user.id,
                 "username": user.username,
                 "email": user.email,
-                "phone_number": user.phone_number
+                "phone_number": user.phone_number,
+                "created_at": user.created_at
             }
         }
     

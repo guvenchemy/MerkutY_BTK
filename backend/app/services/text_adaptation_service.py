@@ -307,7 +307,9 @@ class TextAdaptationService:
         return {
             "word_status": word_status,
             "known_words_list": list(known_words),  # This is already only "known" words from get_user_known_words
-            "total_known_words": len(known_words)
+            "total_known_words": len(known_words),
+            "total_words": len(words),
+            "unknown_words_count": sum(1 for status in word_status.values() if not status)
         }
     
     @staticmethod

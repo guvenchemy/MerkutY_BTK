@@ -3,6 +3,7 @@ from fastapi.security import HTTPBearer, HTTPAuthorizationCredentials
 from sqlalchemy.orm import Session
 from pydantic import BaseModel
 from typing import Optional
+from datetime import datetime
 from app.core.database import get_db
 from app.services.auth_service import AuthService
 from app.models.user_vocabulary import User
@@ -26,7 +27,7 @@ class UserResponse(BaseModel):
     username: str
     email: str
     phone_number: str
-    created_at: str
+    created_at: datetime
     
     class Config:
         from_attributes = True
@@ -97,7 +98,7 @@ async def get_current_user_info(
             "username": user.username,
             "email": user.email,
             "phone_number": user.phone_number,
-            "created_at": user.created_at.isoformat()
+            "created_at": user.created_at
         }
     except HTTPException:
         raise

@@ -119,8 +119,22 @@ class TextAnalysisService:
             
             # Kullanıcı kelime istatistikleri (eğer user_id ve db_session varsa)
             user_vocabulary_stats = None
+            word_analysis_for_coloring = None
             if user_id and db_session:
                 user_vocabulary_stats = self._get_user_vocabulary_stats(user_id, db_session, text)
+                
+                # Word analysis for frontend coloring
+                from app.services.text_adaptation_service import TextAdaptationService
+                user_known_words = self._get_user_known_words(user_id, db_session)
+                
+                # Get username for word analysis
+                from app.models.user_vocabulary import User
+                user = db_session.query(User).filter(User.id == user_id).first()
+                username = user.username if user else None
+                
+                word_analysis_for_coloring = TextAdaptationService.get_word_analysis_for_coloring(
+                    text, set(user_known_words), username, db_session
+                )
             
             # AI destekli analiz (Türkçe açıklamalar)
             ai_analysis = self._get_ai_analysis_turkish(text)
@@ -145,6 +159,11 @@ class TextAnalysisService:
             # Kullanıcı istatistikleri varsa ekle
             if user_vocabulary_stats:
                 result["user_vocabulary_stats"] = user_vocabulary_stats
+                result["analysis"] = user_vocabulary_stats["text_analysis"]
+            
+            # Word analysis for coloring varsa ekle
+            if word_analysis_for_coloring:
+                result["word_analysis"] = word_analysis_for_coloring
             
             # i+1 adaptation varsa ekle
             if adapted_text:
@@ -228,6 +247,8 @@ class TextAnalysisService:
                     "known_words_in_text": len(known_words_in_text),
                     "unknown_words_in_text": len(unknown_words_in_text),
                     "comprehension_rate": round((len(known_words_in_text) / len(unique_words_in_text)) * 100, 1) if unique_words_in_text else 0,
+                    "unknown_percentage": round((len(unknown_words_in_text) / len(unique_words_in_text)) * 100, 1) if unique_words_in_text else 0,
+                    "known_percentage": round((len(known_words_in_text) / len(unique_words_in_text)) * 100, 1) if unique_words_in_text else 0,
                     "text_difficulty": text_difficulty,
                     "unknown_word_examples": unknown_words_in_text[:10]
                 }

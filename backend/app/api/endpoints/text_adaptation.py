@@ -3,7 +3,7 @@ from pydantic import BaseModel
 from typing import Dict, List, Optional
 from app.services.text_adaptation_service import TextAdaptationService
 from app.services.ai_text_adaptation_service import AITextAdaptationService
-from app.services.youtube_service import get_transcript, get_video_id
+from app.services.yt_dlp_service import YTDlpService
 
 router = APIRouter()
 
