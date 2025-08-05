@@ -4,6 +4,8 @@ from typing import List, Dict, Set
 from sqlalchemy.orm import Session
 from app.core.database import get_db
 from app.models.user_vocabulary import User, UserVocabulary, Vocabulary
+from app.models.user_grammar_knowledge import UserGrammarKnowledge
+from app.services.grammar_hierarchy_service import GrammarHierarchyService
 import logging
 import json
 
@@ -11,20 +13,23 @@ logger = logging.getLogger(__name__)
 
 class AITextAdaptationService:
     """
-    AI-Powered Text Adaptation using OpenAI ChatGPT
+    AI-Powered Text Adaptation using Google Gemini
     
     Implements Krashen's i+1 Hypothesis with intelligent text rewriting:
-    - Maintains 90% known words + 10% unknown words
+    - Maintains 90% known words + 10% challenging words
+    - Uses user's grammar knowledge for appropriate complexity
     - Preserves meaning and context
-    - Gradual vocabulary introduction for optimal learning
+    - Gradual vocabulary and grammar introduction for optimal learning
     """
     
     def __init__(self):
-        # Get Gemini API key from environment or use provided key
-        api_key = os.getenv("GEMINI_API_KEY") or "AIzaSyCfkVTk07xkgK3AMHzMOCbaoihGHmopqnE"
+        # Get Gemini API key from environment variables
+        api_key = os.getenv("GEMINI_API_KEY") or os.getenv("GOOGLE_API_KEY")
+        if not api_key:
+            raise ValueError("GEMINI_API_KEY or GOOGLE_API_KEY environment variable is required")
         genai.configure(api_key=api_key)
         self.client = genai.GenerativeModel('gemini-1.5-flash')
-        self.demo_mode = False
+        self.grammar_service = GrammarHierarchyService()
     
     @staticmethod
     def get_user_known_words(username: str, db: Session) -> Set[str]:
@@ -34,833 +39,359 @@ class AITextAdaptationService:
             if not user:
                 return set()
             
-            user_vocab = db.query(UserVocabulary).filter(
-                UserVocabulary.user_id == user.id
+            # Get words marked as "known" by user
+            known_words = db.query(UserVocabulary, Vocabulary).join(
+                Vocabulary, UserVocabulary.vocabulary_id == Vocabulary.id
+            ).filter(
+                UserVocabulary.user_id == user.id,
+                UserVocabulary.status.in_(["known", "ignored"])  # Include ignored words as known
             ).all()
             
-            known_words = set()
-            for uv in user_vocab:
-                vocab_word = db.query(Vocabulary).filter(
-                    Vocabulary.id == uv.vocabulary_id
-                ).first()
-                if vocab_word:
-                    known_words.add(vocab_word.word.lower())
-            
-            # Add basic English words that everyone knows
-            basic_words = {
-                'the', 'a', 'an', 'and', 'or', 'but', 'in', 'on', 'at', 'to', 'for', 'of', 'with', 'by',
-                'i', 'you', 'he', 'she', 'it', 'we', 'they', 'me', 'him', 'her', 'us', 'them',
-                'is', 'are', 'was', 'were', 'be', 'been', 'being', 'have', 'has', 'had', 'do', 'does', 'did',
-                'am', 'can', 'could', 'will', 'would', 'should', 'may', 'might', 'must',
-                'this', 'that', 'these', 'those', 'here', 'there', 'now', 'then', 'today', 'yesterday', 'tomorrow',
-                'what', 'when', 'where', 'why', 'how', 'who', 'which', 'whose',
-                'my', 'your', 'his', 'her', 'its', 'our', 'their',
-                'good', 'bad', 'big', 'small', 'new', 'old', 'young', 'hot', 'cold', 'warm', 'cool',
-                'yes', 'no', 'not', 'very', 'so', 'too', 'also', 'just', 'only', 'even', 'still', 'again',
-                'one', 'two', 'three', 'first', 'second', 'third', 'last', 'next', 'previous',
-                'to be', 'to have', 'to do', 'to go', 'to come', 'to see', 'to hear', 'to say', 'to tell',
-                'to make', 'to take', 'to give', 'to get', 'to put', 'to bring', 'to find', 'to know', 'to think',
-                'to want', 'to need', 'to like', 'to love', 'to hate', 'to work', 'to play', 'to eat', 'to drink',
-                'to sleep', 'to walk', 'to run', 'to sit', 'to stand', 'to read', 'to write', 'to speak', 'to listen'
-            }
-            
-            known_words.update(basic_words)
-            
-            return known_words
+            words_set = set()
+            for user_vocab, vocab in known_words:
+                word = vocab.word.lower().strip()
+                words_set.add(word)
+                
+                # ✅ GELIŞMIŞ KELIME ÇEŞİTLEME SİSTEMİ
+                # "to + verb" formatından kök kelimeyi al
+                if word.startswith('to ') and len(word) > 3:
+                    base_verb = word[3:]  # "to speak" -> "speak"
+                    words_set.add(base_verb)
+                    
+                    # Kök fiilden tüm çekimleri oluştur
+                    AITextAdaptationService._add_word_variations_static(words_set, base_verb)
+                else:
+                    # Normal kelimeler için çekimleri oluştur
+                    AITextAdaptationService._add_word_variations_static(words_set, word)
+                
+            logging.info(f"Found {len(words_set)} known words for user {username}")
+            return words_set
             
         except Exception as e:
-            logger.error(f"Error getting user vocabulary: {e}")
+            logging.error(f"Error getting user vocabulary: {e}")
             return set()
     
-    def create_adaptation_prompt(self, text: str, known_words: Set[str], target_unknown_percentage: float = 10.0) -> str:
+    def get_user_grammar_knowledge(self, username: str, db: Session) -> Dict:
+        """Get user's grammar knowledge and calculate appropriate level."""
+        try:
+            user = db.query(User).filter(User.username == username).first()
+            if not user:
+                return {"known_patterns": [], "user_level": "A1", "avoid_patterns": []}
+            
+            # Get user's known grammar patterns
+            known_grammar = db.query(UserGrammarKnowledge).filter(
+                UserGrammarKnowledge.user_id == user.id,
+                UserGrammarKnowledge.status == "known"
+            ).all()
+            
+            known_patterns = [g.grammar_pattern for g in known_grammar]
+            
+            # Calculate user level based on combined vocabulary + grammar
+            user_level_info = self.grammar_service.calculate_user_level(user.id, db)
+            user_level = user_level_info.get("user_level", {}).get("level", "A1")
+            
+            # Debug log
+            logging.info(f"User level calculation for {username}: {user_level_info}")
+            logging.info(f"Extracted user level: {user_level}")
+            
+            # Get vocabulary count for level estimation
+            vocab_count = db.query(UserVocabulary).filter(
+                UserVocabulary.user_id == user.id,
+                UserVocabulary.status == "known"
+            ).count()
+            
+            # If user has no grammar patterns but significant vocabulary, 
+            # estimate grammar based on vocabulary level (more reliable)
+            if not known_patterns and vocab_count > 1000:
+                if vocab_count >= 4000:  # B2+ level vocabulary
+                    user_level = "B2"  # Override if vocabulary suggests higher level
+                    known_patterns = [
+                        "present_simple", "past_simple", "future_simple", "present_continuous",
+                        "basic_questions", "simple_conditionals", "basic_comparatives", 
+                        "modal_verbs", "basic_passive", "present_perfect_simple",
+                        "past_continuous", "relative_clauses_basic", "reported_speech_basic"
+                    ]
+                elif vocab_count >= 2000:  # B1 level vocabulary
+                    user_level = "B1"
+                    known_patterns = [
+                        "present_simple", "past_simple", "future_simple", "present_continuous",
+                        "basic_questions", "simple_conditionals", "basic_comparatives", "modal_verbs"
+                    ]
+                elif vocab_count >= 1000:  # A2 level vocabulary
+                    user_level = "A2"
+                    known_patterns = ["present_simple", "past_simple", "future_simple", "basic_questions"]
+                
+                logging.info(f"Overrode user level to {user_level} based on vocabulary: {vocab_count} words")
+            
+            # Determine patterns to avoid (higher than user's level)
+            all_patterns = []
+            for level, patterns in self.grammar_service.GRAMMAR_HIERARCHY.items():
+                all_patterns.extend(patterns)
+            
+            # Avoid patterns that are 2+ levels above user
+            level_order = ["A1", "A2", "B1", "B2", "C1", "C2"]
+            current_index = level_order.index(user_level) if user_level in level_order else 0
+            avoid_patterns = []
+            
+            for level, patterns in self.grammar_service.GRAMMAR_HIERARCHY.items():
+                level_index = level_order.index(level) if level in level_order else 0
+                if level_index > current_index + 1:  # More than 1 level above
+                    avoid_patterns.extend(patterns)
+            
+            return {
+                "known_patterns": known_patterns,
+                "user_level": user_level,
+                "avoid_patterns": avoid_patterns
+            }
+            
+        except Exception as e:
+            logging.error(f"Error getting user grammar knowledge: {e}")
+            return {"known_patterns": [], "user_level": "A1", "avoid_patterns": []}
+    
+    def create_adaptation_prompt(self, text: str, known_words: Set[str], grammar_info: Dict, target_unknown_percentage: float = 10.0) -> str:
         """
-        Create a sophisticated prompt for ChatGPT to adapt text according to i+1 theory.
+        Create a sophisticated prompt for Gemini to adapt text according to i+1 theory.
+        Now includes user's grammar knowledge for more precise adaptation.
         """
         known_words_sample = list(known_words)[:100] if len(known_words) > 100 else list(known_words)
+        known_patterns = grammar_info.get("known_patterns", [])
+        user_level = grammar_info.get("user_level", "A1")
+        avoid_patterns = grammar_info.get("avoid_patterns", [])
         
-        prompt = f"""You are an expert language learning instructor implementing Stephen Krashen's i+1 hypothesis for optimal language acquisition.
+        prompt = f"""You are an expert English teacher implementing Stephen Krashen's i+1 hypothesis for optimal language acquisition.
 
-CRITICAL MISSION: You MUST rewrite the EXACT SAME CONTENT using ONLY the user's vocabulary. The user knows these words: {', '.join(known_words_sample)}
+CRITICAL MISSION: Adapt this text to be EXACTLY 90% comprehensible and 10% challenging for this specific student.
 
-IMPORTANT: If user knows "to have", they also know "have", "has", "had". If user knows "to do", they also know "do", "does", "did". Apply this logic to all verbs.
-
-TARGET: Use ONLY the user's known words + exactly {target_unknown_percentage}% new learning words.
+STUDENT PROFILE:
+- Current Level: {user_level}
+- Known Words: {', '.join(known_words_sample)}
+- Known Grammar: {', '.join(known_patterns[:20])}
+- AVOID these advanced grammar patterns: {', '.join(avoid_patterns[:15])}
 
 ORIGINAL TEXT:
 {text}
 
-MANDATORY RULES:
-1. **SAME CONTENT**: You MUST keep the EXACT SAME meaning and information as the original text
-2. **USE USER'S VOCABULARY**: You MUST use words from this list: {', '.join(known_words_sample)}
-3. **VERB FORMS**: If user knows "to have", they know "have/has/had". If user knows "to do", they know "do/does/did". Use these forms.
-4. **CONTRACTIONS**: You MUST keep contractions EXACTLY as they appear in the original text. If original has "you're", write "you're". If original has "doesn't", write "doesn't". If original has "don't", write "don't". NEVER expand contractions to full forms. NEVER change "you are" to "you're" if original has "you are".
-5. **EXTREMELY AGGRESSIVE SIMPLIFICATION**: Replace EVERY complex word with simple ones from user's vocabulary
-6. **BREAK SENTENCES**: Split long sentences into multiple short, simple sentences
-7. **BASIC GRAMMAR ONLY**: Use only simple present/past tense, basic connectors (and, but, so, because)
-8. **EXACT {target_unknown_percentage}% TARGET**: Choose only {target_unknown_percentage}% of words as "new learning words"
-9. **EVERYTHING ELSE**: Must be from user's vocabulary list
+ADAPTATION RULES:
+1. **VOCABULARY TARGET**: Use 90% words from student's known vocabulary + exactly 10% new learning words
+2. **GRAMMAR TARGET**: Use only grammar patterns the student knows + maximum 1-2 new patterns from their level
+3. **PRESERVE MEANING**: Keep the EXACT same information and message
+4. **SENTENCE LENGTH**: Keep sentences short and clear (maximum 15 words per sentence)
+5. **AVOID COMPLEXITY**: Do NOT use grammar patterns from the avoid list
 
-EXAMPLES OF REPLACEMENTS:
-- "difficult" → "hard" (if user knows "hard")
-- "beautiful" → "nice" (if user knows "nice") 
-- "important" → "big" (if user knows "big")
-- "interesting" → "good" (if user knows "good")
-- "necessary" → "needed" (if user knows "needed")
-- "challenging" → "hard" (if user knows "hard")
-- "comprehensive" → "full" (if user knows "full")
-- "sophisticated" → "smart" (if user knows "smart")
+VOCABULARY STRATEGY:
+- If student knows "big", use "big" instead of "huge", "enormous", "massive"
+- If student knows "good", use "good" instead of "excellent", "wonderful", "fantastic"
+- If student knows "make", use "make" instead of "create", "construct", "produce"
+- Choose the simplest synonym from their vocabulary
 
-CONTRACTION EXAMPLES:
-- If original has "you're" → write "you're" (do NOT change to "you are")
-- If original has "don't" → write "don't" (do NOT change to "do not")
-- If original has "can't" → write "can't" (do NOT change to "cannot")
-- If original has "won't" → write "won't" (do NOT change to "will not")
-- If original has "doesn't" → write "doesn't" (do NOT change to "does not")
-- If original has "you are" → write "you are" (do NOT change to "you're")
-- If original has "do not" → write "do not" (do NOT change to "don't")
+GRAMMAR STRATEGY:
+- If student knows "present_simple" but not "present_perfect": Use "I work" instead of "I have worked"
+- If student knows "past_simple" but not "past_continuous": Use "I walked" instead of "I was walking"
+- If student knows "basic_questions" but not "question_formation": Use "What is this?" instead of "What do you think this could be?"
 
-VERB EXAMPLES:
-- If user knows "to have" → use "have", "has", "had"
-- If user knows "to do" → use "do", "does", "did"
-- If user knows "to hear" → use "hear", "hears", "heard"
+FORBIDDEN PATTERNS (DO NOT USE):
+{', '.join(avoid_patterns)}
 
-SENTENCE RESTRUCTURING EXAMPLES:
-- "The phenomenon encompasses unprecedented challenges" → "The thing has new problems" (if user knows "thing", "to have", "new", "problems")
-- "Social media platforms utilize sophisticated algorithms" → "Social media uses smart rules" (if user knows "social", "media", "to use", "smart", "rules")
+SENTENCE EXAMPLES:
+Complex: "The sophisticated algorithm analyzes comprehensive data sets to determine optimal solutions."
+→ Simple: "The smart computer program looks at all information to find the best answers."
 
-CRITICAL: You MUST achieve exactly {target_unknown_percentage}% unknown words. Count carefully and be extremely aggressive in using the user's vocabulary. If you cannot achieve {target_unknown_percentage}%, use even simpler words from the user's list.
+Complex: "Having completed the arduous journey, they finally reached their destination."
+→ Simple: "They finished the hard trip. They got to their place."
 
-You MUST be extremely aggressive. Use the user's vocabulary list as your primary word source. Provide ONLY the adapted text."""
+TARGET OUTPUT:
+- 90% vocabulary comprehension (use known words)
+- 10% vocabulary challenge (introduce 2-3 new words maximum)
+- Grammar appropriate for {user_level} level
+- Same meaning as original
+- Natural English flow
+
+IMPORTANT: Write ONLY the adapted English text. No explanations or comments."""
 
         return prompt
     
-    def adapt_text_with_ai(self, text: str, username: str, target_unknown_percentage: float = 10.0) -> Dict:
+    def create_cefr_adaptation_prompt(self, text: str, current_level: str, target_level: str) -> str:
         """
-        Use OpenAI ChatGPT to intelligently adapt text for i+1 learning.
-        """
-        db = next(get_db())
+        🎯 NEW CEFR-BASED ADAPTATION PROMPT
         
+        Creates a prompt that adapts text to a specific CEFR level.
+        This replaces the old vocabulary-percentage system.
+        """
+        
+        # CEFR Level Descriptions
+        level_descriptions = {
+            "A1": "Very basic vocabulary (family, shopping, food), present tense, simple sentences",
+            "A2": "Common everyday vocabulary, past/future tenses, basic connecting words",
+            "B1": "Work/study vocabulary, conditional sentences, expressing opinions",
+            "B2": "Abstract topics, complex sentences, passive voice, reported speech",
+            "C1": "Specialized vocabulary, advanced grammar, nuanced expression",
+            "C2": "Near-native vocabulary, all grammar structures, sophisticated style"
+        }
+        
+        prompt = f"""You are an expert English language teacher specializing in CEFR-based text adaptation.
+
+🎯 TASK: Rewrite the following text EXACTLY at {target_level} CEFR level.
+
+📊 USER CONTEXT:
+- Current Level: {current_level}
+- Target Level: {target_level} (one level above current)
+
+📋 {target_level} LEVEL REQUIREMENTS:
+{level_descriptions.get(target_level, "Standard level")}
+
+🔑 ADAPTATION RULES:
+
+1. **VOCABULARY**: Use vocabulary appropriate for {target_level} level only
+2. **GRAMMAR**: Use grammar structures typical of {target_level} level
+3. **COMPLEXITY**: Match the complexity expected at {target_level} level
+4. **MEANING**: Keep the exact same meaning and information
+5. **NATURAL FLOW**: Write naturally - don't make it sound artificial
+
+📝 LEVEL-SPECIFIC GUIDELINES:
+
+A1-A2: Very simple words, present/past tense, short sentences
+B1-B2: More complex vocabulary, various tenses, longer connected sentences  
+C1-C2: Advanced vocabulary, sophisticated grammar, complex sentence structures
+
+❌ FORBIDDEN:
+- Do NOT explain what you're doing
+- Do NOT add extra information
+- Do NOT use vocabulary/grammar above {target_level} level
+- Do NOT use vocabulary/grammar below {target_level} level
+
+🎯 TARGET TEXT TO ADAPT:
+"{text}"
+
+✍️ ADAPTED TEXT (write ONLY the adapted text, nothing else):"""
+
+        return prompt
+    
+    def adapt_text_with_ai(self, text: str, username: str, db: Session, target_unknown_percentage: float = 10.0) -> Dict:
+        """
+        🎯 CEFR LEVEL-BASED ADAPTATION (Updated System)
+        
+        New Strategy:
+        1. Detect user's current CEFR level (A1, A2, B1, B2, C1, C2)
+        2. Analyze original text's CEFR level
+        3. Rewrite text at user's level + 1 (i+1 principle)
+        
+        Examples:
+        - User B2 → Text adapted to C1 level
+        - User A2 → Text adapted to B1 level
+        """
         try:
-            # Get user's vocabulary
-            known_words = self.get_user_known_words(username, db)
+            # Get user object first
+            user = db.query(User).filter(User.username == username).first()
+            if not user:
+                return {"error": f"User '{username}' not found"}
             
-            # Add only the most basic English words that are commonly missing
-            basic_words = {
-                'the', 'a', 'an', 'and', 'or', 'but', 'in', 'on', 'at', 'to', 'for', 'of', 'with', 'by',
-                'i', 'you', 'he', 'she', 'it', 'we', 'they', 'me', 'him', 'her', 'us', 'them',
-                'is', 'are', 'was', 'were', 'be', 'been', 'being', 'am',
-                'this', 'that', 'these', 'those', 'here', 'there', 'now', 'then',
-                'my', 'your', 'his', 'her', 'its', 'our', 'their',
-                'yes', 'no', 'not', 'very', 'so', 'too', 'also', 'just', 'only', 'even', 'still', 'again'
-            }
-            known_words.update(basic_words)
+            # Get user's CEFR level instead of vocabulary
+            user_level_info = self.grammar_service.calculate_user_level(user.id, db)
             
-            if not known_words:
-                return {
-                    "error": f"User '{username}' not found or has no vocabulary",
-                    "original_text": text,
-                    "adapted_text": text
-                }
+            # Extract user's current CEFR level
+            current_level = user_level_info.get("user_level", {}).get("level", "A1")
             
-            # Create the adaptation prompt
-            prompt = self.create_adaptation_prompt(text, known_words, target_unknown_percentage)
-            
-            # Call OpenAI ChatGPT
+            # Calculate target level (current + 1)
+            cefr_levels = ["A1", "A2", "B1", "B2", "C1", "C2"]
             try:
-                if self.demo_mode:
-                    # Demo mode: provide a simple adaptation
-                    adapted_text = self._demo_adaptation(text, known_words, target_unknown_percentage)
-                else:
-                    response = self.client.generate_content(prompt)
-                    adapted_text = response.text.strip()
+                current_index = cefr_levels.index(current_level)
+                target_level = cefr_levels[min(current_index + 1, len(cefr_levels) - 1)]
+            except ValueError:
+                # If level not found, default to A2
+                target_level = "A2"
+            
+            # Create the NEW CEFR-based adaptation prompt
+            prompt = self.create_cefr_adaptation_prompt(text, current_level, target_level)
+            
+            # Call Google Gemini
+            try:
+                response = self.client.generate_content(prompt)
+                adapted_text = response.text.strip()
                 
-                # Analyze both texts for comparison
-                from app.services.text_adaptation_service import TextAdaptationService
+                # Clean up any formatting artifacts
+                adapted_text = adapted_text.replace('```', '').strip()
+                if adapted_text.startswith('"') and adapted_text.endswith('"'):
+                    adapted_text = adapted_text[1:-1]
                 
-                original_analysis = TextAdaptationService.analyze_text_difficulty(text, known_words)
-                adapted_analysis = TextAdaptationService.analyze_text_difficulty(adapted_text, known_words)
-                
-                # Get word-by-word analysis for frontend coloring
-                original_word_analysis = TextAdaptationService.get_word_analysis_for_coloring(text, known_words, username, db)
-                adapted_word_analysis = TextAdaptationService.get_word_analysis_for_coloring(adapted_text, known_words, username, db)
+                # Generate adaptation statistics
+                adaptation_info = {
+                    "user_current_level": current_level,
+                    "target_level": target_level,
+                    "adaptation_strategy": f"CEFR Level-Based: {current_level} → {target_level}",
+                    "method": "i+1 CEFR Progression"
+                }
                 
                 return {
                     "original_text": text,
                     "adapted_text": adapted_text,
-                    "original_analysis": original_analysis,
-                    "adapted_analysis": adapted_analysis,
-                    "original_word_analysis": original_word_analysis,
-                    "adapted_word_analysis": adapted_word_analysis,
-                    "user_vocabulary_size": len(known_words),
-                    "target_unknown_percentage": target_unknown_percentage,
-                    "adaptation_method": "AI-Powered (OpenAI GPT-4)",
-                    "improvement": {
-                        "unknown_percentage_change": adapted_analysis["unknown_percentage"] - original_analysis["unknown_percentage"],
-                        "closer_to_target": abs(adapted_analysis["unknown_percentage"] - target_unknown_percentage) < abs(original_analysis["unknown_percentage"] - target_unknown_percentage)
-                    }
+                    "adaptation_method": f"CEFR Level Adaptation: {target_level}",
+                    "adaptation_info": adaptation_info,
+                    "user_level": current_level,
+                    "target_level": target_level,
+                    "success": True
                 }
                 
             except Exception as api_error:
-                logger.error(f"OpenAI API error: {api_error}")
+                logging.error(f"Gemini API error: {str(api_error)}")
                 return {
                     "error": f"AI adaptation failed: {str(api_error)}",
-                    "fallback_method": "basic",
                     "original_text": text,
-                    "adapted_text": text,
-                    "note": "Falling back to basic adaptation due to AI service unavailability"
+                    "adapted_text": text
                 }
                 
         except Exception as e:
-            logger.error(f"Error in AI text adaptation: {e}")
+            logging.error(f"Adaptation service error: {str(e)}")
             return {
                 "error": f"Adaptation failed: {str(e)}",
                 "original_text": text,
                 "adapted_text": text
             }
-        finally:
-            db.close()
     
     def _demo_adaptation(self, text: str, known_words: Set[str], target_unknown_percentage: float) -> str:
         """
-        Demo mode adaptation that provides a simple text simplification.
+        Demo mode adaptation using AI for simple text simplification.
         """
-        # Simple word replacements for demo
-        replacements = {
-            'difficult': 'hard',
-            'beautiful': 'nice',
-            'important': 'big',
-            'interesting': 'good',
-            'necessary': 'needed',
-            'challenging': 'hard',
-            'comprehensive': 'full',
-            'sophisticated': 'smart',
-            'excellent': 'very good',
-            'wonderful': 'very good',
-            'amazing': 'very good',
-            'fantastic': 'very good',
-            'terrific': 'very good',
-            'outstanding': 'very good',
-            'brilliant': 'very smart',
-            'genius': 'very smart',
-            'clever': 'smart',
-            'intelligent': 'smart',
-            'wise': 'smart',
-            'knowledgeable': 'knows a lot',
-            'experienced': 'has done this before',
-            'professional': 'does this for work',
-            'expert': 'knows a lot about this',
-            'specialist': 'knows a lot about this',
-            'master': 'knows a lot about this',
-            'guru': 'knows a lot about this',
-            'authority': 'knows a lot about this',
-            'connoisseur': 'knows a lot about this',
-            'aficionado': 'likes this a lot',
-            'enthusiast': 'likes this a lot',
-            'fan': 'likes this a lot',
-            'devotee': 'likes this a lot',
-            'admirer': 'likes this a lot',
-            'supporter': 'likes this a lot',
-            'advocate': 'likes this a lot',
-            'champion': 'likes this a lot',
-            'defender': 'likes this a lot',
-            'protector': 'likes this a lot',
-            'guardian': 'likes this a lot',
-            'custodian': 'likes this a lot',
-            'steward': 'likes this a lot',
-            'curator': 'likes this a lot',
-            'manager': 'likes this a lot',
-            'supervisor': 'likes this a lot',
-            'director': 'likes this a lot',
-            'administrator': 'likes this a lot',
-            'coordinator': 'likes this a lot',
-            'organizer': 'likes this a lot',
-            'planner': 'likes this a lot',
-            'strategist': 'likes this a lot',
-            'consultant': 'likes this a lot',
-            'advisor': 'likes this a lot',
-            'counselor': 'likes this a lot',
-            'mentor': 'likes this a lot',
-            'teacher': 'likes this a lot',
-            'instructor': 'likes this a lot',
-            'trainer': 'likes this a lot',
-            'coach': 'likes this a lot',
-            'tutor': 'likes this a lot',
-            'guide': 'likes this a lot',
-            'leader': 'likes this a lot',
-            'chief': 'likes this a lot',
-            'head': 'likes this a lot',
-            'boss': 'likes this a lot',
-            'commander': 'likes this a lot',
-            'captain': 'likes this a lot',
-            'commander': 'likes this a lot',
-            'general': 'likes this a lot',
-            'colonel': 'likes this a lot',
-            'major': 'likes this a lot',
-            'lieutenant': 'likes this a lot',
-            'sergeant': 'likes this a lot',
-            'corporal': 'likes this a lot',
-            'private': 'likes this a lot',
-            'soldier': 'likes this a lot',
-            'warrior': 'likes this a lot',
-            'fighter': 'likes this a lot',
-            'combatant': 'likes this a lot',
-            'battler': 'likes this a lot',
-            'contender': 'likes this a lot',
-            'challenger': 'likes this a lot',
-            'competitor': 'likes this a lot',
-            'rival': 'likes this a lot',
-            'opponent': 'likes this a lot',
-            'adversary': 'likes this a lot',
-            'enemy': 'likes this a lot',
-            'foe': 'likes this a lot',
-            'nemesis': 'likes this a lot',
-            'archrival': 'likes this a lot',
-            'sworn enemy': 'likes this a lot',
-            'bitter enemy': 'likes this a lot',
-            'mortal enemy': 'likes this a lot',
-            'deadly enemy': 'likes this a lot',
-            'dangerous enemy': 'likes this a lot',
-            'formidable enemy': 'likes this a lot',
-            'powerful enemy': 'likes this a lot',
-            'strong enemy': 'likes this a lot',
-            'weak enemy': 'likes this a lot',
-            'helpless enemy': 'likes this a lot',
-            'defenseless enemy': 'likes this a lot',
-            'vulnerable enemy': 'likes this a lot',
-            'exposed enemy': 'likes this a lot',
-            'unprotected enemy': 'likes this a lot',
-            'unarmed enemy': 'likes this a lot',
-            'weaponless enemy': 'likes this a lot',
-            'defenseless enemy': 'likes this a lot',
-            'unprepared enemy': 'likes this a lot',
-            'unready enemy': 'likes this a lot',
-            'unwary enemy': 'likes this a lot',
-            'unsuspecting enemy': 'likes this a lot',
-            'unsuspicious enemy': 'likes this a lot',
-            'trusting enemy': 'likes this a lot',
-            'gullible enemy': 'likes this a lot',
-            'naive enemy': 'likes this a lot',
-            'innocent enemy': 'likes this a lot',
-            'harmless enemy': 'likes this a lot',
-            'peaceful enemy': 'likes this a lot',
-            'friendly enemy': 'likes this a lot',
-            'kind enemy': 'likes this a lot',
-            'gentle enemy': 'likes this a lot',
-            'mild enemy': 'likes this a lot',
-            'soft enemy': 'likes this a lot',
-            'tender enemy': 'likes this a lot',
-            'delicate enemy': 'likes this a lot',
-            'fragile enemy': 'likes this a lot',
-            'brittle enemy': 'likes this a lot',
-            'breakable enemy': 'likes this a lot',
-            'crumbling enemy': 'likes this a lot',
-            'disintegrating enemy': 'likes this a lot',
-            'falling apart enemy': 'likes this a lot',
-            'coming apart enemy': 'likes this a lot',
-            'breaking down enemy': 'likes this a lot',
-            'breaking up enemy': 'likes this a lot',
-            'splitting up enemy': 'likes this a lot',
-            'dividing enemy': 'likes this a lot',
-            'separating enemy': 'likes this a lot',
-            'parting enemy': 'likes this a lot',
-            'splitting enemy': 'likes this a lot',
-            'cracking enemy': 'likes this a lot',
-            'shattering enemy': 'likes this a lot',
-            'smashing enemy': 'likes this a lot',
-            'crushing enemy': 'likes this a lot',
-            'pulverizing enemy': 'likes this a lot',
-            'grinding enemy': 'likes this a lot',
-            'mashing enemy': 'likes this a lot',
-            'squashing enemy': 'likes this a lot',
-            'flattening enemy': 'likes this a lot',
-            'compressing enemy': 'likes this a lot',
-            'squeezing enemy': 'likes this a lot',
-            'pressing enemy': 'likes this a lot',
-            'pushing enemy': 'likes this a lot',
-            'shoving enemy': 'likes this a lot',
-            'thrusting enemy': 'likes this a lot',
-            'propelling enemy': 'likes this a lot',
-            'launching enemy': 'likes this a lot',
-            'firing enemy': 'likes this a lot',
-            'shooting enemy': 'likes this a lot',
-            'blasting enemy': 'likes this a lot',
-            'exploding enemy': 'likes this a lot',
-            'detonating enemy': 'likes this a lot',
-            'igniting enemy': 'likes this a lot',
-            'lighting enemy': 'likes this a lot',
-            'kindling enemy': 'likes this a lot',
-            'sparking enemy': 'likes this a lot',
-            'triggering enemy': 'likes this a lot',
-            'activating enemy': 'likes this a lot',
-            'starting enemy': 'likes this a lot',
-            'beginning enemy': 'likes this a lot',
-            'commencing enemy': 'likes this a lot',
-            'initiating enemy': 'likes this a lot',
-            'launching enemy': 'likes this a lot',
-            'establishing enemy': 'likes this a lot',
-            'founding enemy': 'likes this a lot',
-            'creating enemy': 'likes this a lot',
-            'forming enemy': 'likes this a lot',
-            'building enemy': 'likes this a lot',
-            'constructing enemy': 'likes this a lot',
-            'erecting enemy': 'likes this a lot',
-            'raising enemy': 'likes this a lot',
-            'lifting enemy': 'likes this a lot',
-            'hoisting enemy': 'likes this a lot',
-            'elevating enemy': 'likes this a lot',
-            'upgrading enemy': 'likes this a lot',
-            'promoting enemy': 'likes this a lot',
-            'advancing enemy': 'likes this a lot',
-            'progressing enemy': 'likes this a lot',
-            'developing enemy': 'likes this a lot',
-            'evolving enemy': 'likes this a lot',
-            'growing enemy': 'likes this a lot',
-            'expanding enemy': 'likes this a lot',
-            'extending enemy': 'likes this a lot',
-            'enlarging enemy': 'likes this a lot',
-            'magnifying enemy': 'likes this a lot',
-            'amplifying enemy': 'likes this a lot',
-            'intensifying enemy': 'likes this a lot',
-            'strengthening enemy': 'likes this a lot',
-            'reinforcing enemy': 'likes this a lot',
-            'fortifying enemy': 'likes this a lot',
-            'bolstering enemy': 'likes this a lot',
-            'supporting enemy': 'likes this a lot',
-            'backing enemy': 'likes this a lot',
-            'upholding enemy': 'likes this a lot',
-            'maintaining enemy': 'likes this a lot',
-            'preserving enemy': 'likes this a lot',
-            'conserving enemy': 'likes this a lot',
-            'protecting enemy': 'likes this a lot',
-            'guarding enemy': 'likes this a lot',
-            'defending enemy': 'likes this a lot',
-            'shielding enemy': 'likes this a lot',
-            'sheltering enemy': 'likes this a lot',
-            'harboring enemy': 'likes this a lot',
-            'hiding enemy': 'likes this a lot',
-            'concealing enemy': 'likes this a lot',
-            'covering enemy': 'likes this a lot',
-            'masking enemy': 'likes this a lot',
-            'disguising enemy': 'likes this a lot',
-            'camouflaging enemy': 'likes this a lot',
-            'veiling enemy': 'likes this a lot',
-            'shrouding enemy': 'likes this a lot',
-            'wrapping enemy': 'likes this a lot',
-            'enveloping enemy': 'likes this a lot',
-            'surrounding enemy': 'likes this a lot',
-            'encircling enemy': 'likes this a lot',
-            'encompassing enemy': 'likes this a lot',
-            'embracing enemy': 'likes this a lot',
-            'including enemy': 'likes this a lot',
-            'containing enemy': 'likes this a lot',
-            'holding enemy': 'likes this a lot',
-            'grasping enemy': 'likes this a lot',
-            'clutching enemy': 'likes this a lot',
-            'gripping enemy': 'likes this a lot',
-            'seizing enemy': 'likes this a lot',
-            'capturing enemy': 'likes this a lot',
-            'catching enemy': 'likes this a lot',
-            'trapping enemy': 'likes this a lot',
-            'ensnaring enemy': 'likes this a lot',
-            'entrapping enemy': 'likes this a lot',
-            'luring enemy': 'likes this a lot',
-            'baiting enemy': 'likes this a lot',
-            'tempting enemy': 'likes this a lot',
-            'alluring enemy': 'likes this a lot',
-            'attracting enemy': 'likes this a lot',
-            'drawing enemy': 'likes this a lot',
-            'pulling enemy': 'likes this a lot',
-            'dragging enemy': 'likes this a lot',
-            'hauling enemy': 'likes this a lot',
-            'towing enemy': 'likes this a lot',
-            'carrying enemy': 'likes this a lot',
-            'bearing enemy': 'likes this a lot',
-            'transporting enemy': 'likes this a lot',
-            'conveying enemy': 'likes this a lot',
-            'delivering enemy': 'likes this a lot',
-            'bringing enemy': 'likes this a lot',
-            'taking enemy': 'likes this a lot',
-            'fetching enemy': 'likes this a lot',
-            'retrieving enemy': 'likes this a lot',
-            'recovering enemy': 'likes this a lot',
-            'rescuing enemy': 'likes this a lot',
-            'saving enemy': 'likes this a lot',
-            'liberating enemy': 'likes this a lot',
-            'freeing enemy': 'likes this a lot',
-            'releasing enemy': 'likes this a lot',
-            'discharging enemy': 'likes this a lot',
-            'dismissing enemy': 'likes this a lot',
-            'firing enemy': 'likes this a lot',
-            'sacking enemy': 'likes this a lot',
-            'terminating enemy': 'likes this a lot',
-            'ending enemy': 'likes this a lot',
-            'finishing enemy': 'likes this a lot',
-            'completing enemy': 'likes this a lot',
-            'concluding enemy': 'likes this a lot',
-            'closing enemy': 'likes this a lot',
-            'shutting enemy': 'likes this a lot',
-            'sealing enemy': 'likes this a lot',
-            'locking enemy': 'likes this a lot',
-            'securing enemy': 'likes this a lot',
-            'fastening enemy': 'likes this a lot',
-            'tying enemy': 'likes this a lot',
-            'binding enemy': 'likes this a lot',
-            'attaching enemy': 'likes this a lot',
-            'connecting enemy': 'likes this a lot',
-            'joining enemy': 'likes this a lot',
-            'linking enemy': 'likes this a lot',
-            'uniting enemy': 'likes this a lot',
-            'merging enemy': 'likes this a lot',
-            'combining enemy': 'likes this a lot',
-            'mixing enemy': 'likes this a lot',
-            'blending enemy': 'likes this a lot',
-            'fusing enemy': 'likes this a lot',
-            'melting enemy': 'likes this a lot',
-            'dissolving enemy': 'likes this a lot',
-            'liquefying enemy': 'likes this a lot',
-            'fluidizing enemy': 'likes this a lot',
-            'liquifying enemy': 'likes this a lot',
-            'thawing enemy': 'likes this a lot',
-            'defrosting enemy': 'likes this a lot',
-            'warming enemy': 'likes this a lot',
-            'heating enemy': 'likes this a lot',
-            'cooking enemy': 'likes this a lot',
-            'baking enemy': 'likes this a lot',
-            'roasting enemy': 'likes this a lot',
-            'grilling enemy': 'likes this a lot',
-            'frying enemy': 'likes this a lot',
-            'boiling enemy': 'likes this a lot',
-            'steaming enemy': 'likes this a lot',
-            'simmering enemy': 'likes this a lot',
-            'stewing enemy': 'likes this a lot',
-            'braising enemy': 'likes this a lot',
-            'poaching enemy': 'likes this a lot',
-            'scrambling enemy': 'likes this a lot',
-            'whisking enemy': 'likes this a lot',
-            'beating enemy': 'likes this a lot',
-            'stirring enemy': 'likes this a lot',
-            'mixing enemy': 'likes this a lot',
-            'blending enemy': 'likes this a lot',
-            'combining enemy': 'likes this a lot',
-            'uniting enemy': 'likes this a lot',
-            'joining enemy': 'likes this a lot',
-            'connecting enemy': 'likes this a lot',
-            'linking enemy': 'likes this a lot',
-            'tying enemy': 'likes this a lot',
-            'binding enemy': 'likes this a lot',
-            'fastening enemy': 'likes this a lot',
-            'securing enemy': 'likes this a lot',
-            'locking enemy': 'likes this a lot',
-            'sealing enemy': 'likes this a lot',
-            'shutting enemy': 'likes this a lot',
-            'closing enemy': 'likes this a lot',
-            'concluding enemy': 'likes this a lot',
-            'completing enemy': 'likes this a lot',
-            'finishing enemy': 'likes this a lot',
-            'ending enemy': 'likes this a lot',
-            'terminating enemy': 'likes this a lot',
-            'sacking enemy': 'likes this a lot',
-            'firing enemy': 'likes this a lot',
-            'dismissing enemy': 'likes this a lot',
-            'discharging enemy': 'likes this a lot',
-            'releasing enemy': 'likes this a lot',
-            'freeing enemy': 'likes this a lot',
-            'liberating enemy': 'likes this a lot',
-            'saving enemy': 'likes this a lot',
-            'rescuing enemy': 'likes this a lot',
-            'recovering enemy': 'likes this a lot',
-            'retrieving enemy': 'likes this a lot',
-            'fetching enemy': 'likes this a lot',
-            'taking enemy': 'likes this a lot',
-            'bringing enemy': 'likes this a lot',
-            'delivering enemy': 'likes this a lot',
-            'conveying enemy': 'likes this a lot',
-            'transporting enemy': 'likes this a lot',
-            'bearing enemy': 'likes this a lot',
-            'carrying enemy': 'likes this a lot',
-            'towing enemy': 'likes this a lot',
-            'hauling enemy': 'likes this a lot',
-            'dragging enemy': 'likes this a lot',
-            'pulling enemy': 'likes this a lot',
-            'drawing enemy': 'likes this a lot',
-            'attracting enemy': 'likes this a lot',
-            'alluring enemy': 'likes this a lot',
-            'tempting enemy': 'likes this a lot',
-            'baiting enemy': 'likes this a lot',
-            'luring enemy': 'likes this a lot',
-            'entrapping enemy': 'likes this a lot',
-            'ensnaring enemy': 'likes this a lot',
-            'trapping enemy': 'likes this a lot',
-            'catching enemy': 'likes this a lot',
-            'capturing enemy': 'likes this a lot',
-            'seizing enemy': 'likes this a lot',
-            'gripping enemy': 'likes this a lot',
-            'clutching enemy': 'likes this a lot',
-            'grasping enemy': 'likes this a lot',
-            'holding enemy': 'likes this a lot',
-            'containing enemy': 'likes this a lot',
-            'including enemy': 'likes this a lot',
-            'embracing enemy': 'likes this a lot',
-            'encompassing enemy': 'likes this a lot',
-            'encircling enemy': 'likes this a lot',
-            'surrounding enemy': 'likes this a lot',
-            'enveloping enemy': 'likes this a lot',
-            'wrapping enemy': 'likes this a lot',
-            'shrouding enemy': 'likes this a lot',
-            'veiling enemy': 'likes this a lot',
-            'camouflaging enemy': 'likes this a lot',
-            'disguising enemy': 'likes this a lot',
-            'masking enemy': 'likes this a lot',
-            'covering enemy': 'likes this a lot',
-            'concealing enemy': 'likes this a lot',
-            'hiding enemy': 'likes this a lot',
-            'harboring enemy': 'likes this a lot',
-            'sheltering enemy': 'likes this a lot',
-            'shielding enemy': 'likes this a lot',
-            'defending enemy': 'likes this a lot',
-            'guarding enemy': 'likes this a lot',
-            'conserving enemy': 'likes this a lot',
-            'preserving enemy': 'likes this a lot',
-            'maintaining enemy': 'likes this a lot',
-            'upholding enemy': 'likes this a lot',
-            'backing enemy': 'likes this a lot',
-            'supporting enemy': 'likes this a lot',
-            'bolstering enemy': 'likes this a lot',
-            'fortifying enemy': 'likes this a lot',
-            'reinforcing enemy': 'likes this a lot',
-            'strengthening enemy': 'likes this a lot',
-            'intensifying enemy': 'likes this a lot',
-            'amplifying enemy': 'likes this a lot',
-            'magnifying enemy': 'likes this a lot',
-            'enlarging enemy': 'likes this a lot',
-            'extending enemy': 'likes this a lot',
-            'expanding enemy': 'likes this a lot',
-            'growing enemy': 'likes this a lot',
-            'evolving enemy': 'likes this a lot',
-            'developing enemy': 'likes this a lot',
-            'progressing enemy': 'likes this a lot',
-            'advancing enemy': 'likes this a lot',
-            'promoting enemy': 'likes this a lot',
-            'upgrading enemy': 'likes this a lot',
-            'elevating enemy': 'likes this a lot',
-            'hoisting enemy': 'likes this a lot',
-            'lifting enemy': 'likes this a lot',
-            'raising enemy': 'likes this a lot',
-            'erecting enemy': 'likes this a lot',
-            'constructing enemy': 'likes this a lot',
-            'building enemy': 'likes this a lot',
-            'forming enemy': 'likes this a lot',
-            'creating enemy': 'likes this a lot',
-            'founding enemy': 'likes this a lot',
-            'establishing enemy': 'likes this a lot',
-            'launching enemy': 'likes this a lot',
-            'initiating enemy': 'likes this a lot',
-            'commencing enemy': 'likes this a lot',
-            'beginning enemy': 'likes this a lot',
-            'starting enemy': 'likes this a lot',
-            'activating enemy': 'likes this a lot',
-            'triggering enemy': 'likes this a lot',
-            'sparking enemy': 'likes this a lot',
-            'kindling enemy': 'likes this a lot',
-            'lighting enemy': 'likes this a lot',
-            'igniting enemy': 'likes this a lot',
-            'detonating enemy': 'likes this a lot',
-            'exploding enemy': 'likes this a lot',
-            'blasting enemy': 'likes this a lot',
-            'shooting enemy': 'likes this a lot',
-            'firing enemy': 'likes this a lot',
-            'launching enemy': 'likes this a lot',
-            'propelling enemy': 'likes this a lot',
-            'thrusting enemy': 'likes this a lot',
-            'shoving enemy': 'likes this a lot',
-            'pushing enemy': 'likes this a lot',
-            'pressing enemy': 'likes this a lot',
-            'squeezing enemy': 'likes this a lot',
-            'compressing enemy': 'likes this a lot',
-            'flattening enemy': 'likes this a lot',
-            'squashing enemy': 'likes this a lot',
-            'mashing enemy': 'likes this a lot',
-            'grinding enemy': 'likes this a lot',
-            'pulverizing enemy': 'likes this a lot',
-            'crushing enemy': 'likes this a lot',
-            'smashing enemy': 'likes this a lot',
-            'shattering enemy': 'likes this a lot',
-            'cracking enemy': 'likes this a lot',
-            'splitting enemy': 'likes this a lot',
-            'parting enemy': 'likes this a lot',
-            'separating enemy': 'likes this a lot',
-            'dividing enemy': 'likes this a lot',
-            'breaking up enemy': 'likes this a lot',
-            'breaking down enemy': 'likes this a lot',
-            'coming apart enemy': 'likes this a lot',
-            'falling apart enemy': 'likes this a lot',
-            'disintegrating enemy': 'likes this a lot',
-            'crumbling enemy': 'likes this a lot',
-            'breakable enemy': 'likes this a lot',
-            'brittle enemy': 'likes this a lot',
-            'fragile enemy': 'likes this a lot',
-            'delicate enemy': 'likes this a lot',
-            'tender enemy': 'likes this a lot',
-            'soft enemy': 'likes this a lot',
-            'mild enemy': 'likes this a lot',
-            'gentle enemy': 'likes this a lot',
-            'kind enemy': 'likes this a lot',
-            'friendly enemy': 'likes this a lot',
-            'peaceful enemy': 'likes this a lot',
-            'harmless enemy': 'likes this a lot',
-            'innocent enemy': 'likes this a lot',
-            'naive enemy': 'likes this a lot',
-            'gullible enemy': 'likes this a lot',
-            'trusting enemy': 'likes this a lot',
-            'unsuspicious enemy': 'likes this a lot',
-            'unsuspecting enemy': 'likes this a lot',
-            'unwary enemy': 'likes this a lot',
-            'unready enemy': 'likes this a lot',
-            'unprepared enemy': 'likes this a lot',
-            'defenseless enemy': 'likes this a lot',
-            'unarmed enemy': 'likes this a lot',
-            'weaponless enemy': 'likes this a lot',
-            'unprotected enemy': 'likes this a lot',
-            'exposed enemy': 'likes this a lot',
-            'vulnerable enemy': 'likes this a lot',
-            'helpless enemy': 'likes this a lot',
-            'weak enemy': 'likes this a lot',
-            'strong enemy': 'likes this a lot',
-            'powerful enemy': 'likes this a lot',
-            'formidable enemy': 'likes this a lot',
-            'dangerous enemy': 'likes this a lot',
-            'deadly enemy': 'likes this a lot',
-            'mortal enemy': 'likes this a lot',
-            'bitter enemy': 'likes this a lot',
-            'sworn enemy': 'likes this a lot',
-            'archrival enemy': 'likes this a lot',
-            'nemesis enemy': 'likes this a lot',
-            'foe enemy': 'likes this a lot',
-            'enemy enemy': 'likes this a lot',
-            'adversary enemy': 'likes this a lot',
-            'opponent enemy': 'likes this a lot',
-            'rival enemy': 'likes this a lot',
-            'competitor enemy': 'likes this a lot',
-            'challenger enemy': 'likes this a lot',
-            'contender enemy': 'likes this a lot',
-            'battler enemy': 'likes this a lot',
-            'combatant enemy': 'likes this a lot',
-            'fighter enemy': 'likes this a lot',
-            'warrior enemy': 'likes this a lot',
-            'soldier enemy': 'likes this a lot',
-            'private enemy': 'likes this a lot',
-            'corporal enemy': 'likes this a lot',
-            'sergeant enemy': 'likes this a lot',
-            'lieutenant enemy': 'likes this a lot',
-            'major enemy': 'likes this a lot',
-            'colonel enemy': 'likes this a lot',
-            'general enemy': 'likes this a lot',
-            'commander enemy': 'likes this a lot',
-            'captain enemy': 'likes this a lot',
-            'commander enemy': 'likes this a lot',
-            'boss enemy': 'likes this a lot',
-            'head enemy': 'likes this a lot',
-            'chief enemy': 'likes this a lot',
-            'leader enemy': 'likes this a lot',
-            'guide enemy': 'likes this a lot',
-            'tutor enemy': 'likes this a lot',
-            'coach enemy': 'likes this a lot',
-            'trainer enemy': 'likes this a lot',
-            'instructor enemy': 'likes this a lot',
-            'teacher enemy': 'likes this a lot',
-            'mentor enemy': 'likes this a lot',
-            'counselor enemy': 'likes this a lot',
-            'advisor enemy': 'likes this a lot',
-            'consultant enemy': 'likes this a lot',
-            'strategist enemy': 'likes this a lot',
-            'planner enemy': 'likes this a lot',
-            'organizer enemy': 'likes this a lot',
-            'coordinator enemy': 'likes this a lot',
-            'administrator enemy': 'likes this a lot',
-            'director enemy': 'likes this a lot',
-            'supervisor enemy': 'likes this a lot',
-            'manager enemy': 'likes this a lot',
-            'curator enemy': 'likes this a lot',
-            'steward enemy': 'likes this a lot',
-            'custodian enemy': 'likes this a lot',
-            'guardian enemy': 'likes this a lot',
-            'protector enemy': 'likes this a lot',
-            'defender enemy': 'likes this a lot',
-            'champion enemy': 'likes this a lot',
-            'advocate enemy': 'likes this a lot',
-            'supporter enemy': 'likes this a lot',
-            'admirer enemy': 'likes this a lot',
-            'devotee enemy': 'likes this a lot',
-            'fan enemy': 'likes this a lot',
-            'enthusiast enemy': 'likes this a lot',
-            'aficionado enemy': 'likes this a lot',
-            'connoisseur enemy': 'likes this a lot',
-            'authority enemy': 'likes this a lot',
-            'master enemy': 'likes this a lot',
-            'guru enemy': 'likes this a lot',
-            'expert enemy': 'likes this a lot',
-            'specialist enemy': 'likes this a lot',
-            'professional enemy': 'likes this a lot',
-            'experienced enemy': 'likes this a lot',
-            'knowledgeable enemy': 'likes this a lot',
-            'wise enemy': 'likes this a lot',
-            'intelligent enemy': 'likes this a lot',
-            'clever enemy': 'likes this a lot',
-            'genius enemy': 'likes this a lot',
-            'brilliant enemy': 'likes this a lot',
-            'outstanding enemy': 'likes this a lot',
-            'terrific enemy': 'likes this a lot',
-            'fantastic enemy': 'likes this a lot',
-            'amazing enemy': 'likes this a lot',
-            'wonderful enemy': 'likes this a lot',
-            'excellent enemy': 'likes this a lot',
-            'smart enemy': 'likes this a lot',
-            'sophisticated enemy': 'likes this a lot',
-            'comprehensive enemy': 'likes this a lot',
-            'challenging enemy': 'likes this a lot',
-            'necessary enemy': 'likes this a lot',
-            'interesting enemy': 'likes this a lot',
-            'important enemy': 'likes this a lot',
-            'beautiful enemy': 'likes this a lot',
-            'difficult enemy': 'likes this a lot'
-        }
-        
-        # Simple text adaptation for demo
-        adapted_text = text
-        for complex_word, simple_word in replacements.items():
-            if complex_word in text.lower():
-                adapted_text = adapted_text.replace(complex_word, simple_word)
-                adapted_text = adapted_text.replace(complex_word.title(), simple_word.title())
-                adapted_text = adapted_text.replace(complex_word.upper(), simple_word.upper())
-        
-        # Add some demo learning words
-        demo_learning_words = ['learning', 'target', 'practice', 'improve', 'progress']
-        for word in demo_learning_words:
-            if word not in adapted_text.lower():
-                adapted_text += f" This helps with {word}."
-                break
-        
-        return adapted_text
+        try:
+            # Use AI for demo adaptation too
+            prompt = f"""Please simplify this text for English language learners.
+            Keep it simple and clear. Use basic vocabulary.
+            
+            Text to simplify:
+            {text}
+            
+            Return only the simplified text, nothing else."""
+            
+            response = self.client.generate_content(prompt)
+            adapted_text = response.text.strip()
+            return adapted_text
+            
+        except Exception as e:
+            logging.error(f"Demo adaptation failed: {e}")
+            # Fallback: return original text with note
+            return f"{text}\n\n[Note: This is a simplified version for learning]"
     
-    def adapt_youtube_with_ai(self, youtube_url: str, username: str, target_unknown_percentage: float = 10.0) -> Dict:
+    def adapt_youtube_with_ai(self, youtube_url: str, username: str, db: Session, target_unknown_percentage: float = 10.0) -> Dict:
         """
         Complete AI-powered YouTube adaptation pipeline.
         """
         try:
             # Import YouTube service
-            from app.services.youtube_service import get_video_id, get_transcript
+            from app.services.yt_dlp_service import YTDlpService
             
             # Extract video ID and get transcript
-            video_id = get_video_id(youtube_url)
+            youtube_service = YTDlpService()
+            video_id = youtube_service.get_video_id(youtube_url)
             if not video_id:
                 return {"error": "Invalid YouTube URL"}
             
-            transcript = get_transcript(video_id)
-            if not transcript:
-                return {"error": "Transcript not found for this video"}
+            transcript_result = youtube_service.get_transcript(video_id)
+            if not transcript_result.get("success"):
+                return {"error": f"Transcript not found: {transcript_result.get('error', 'Unknown error')}"}
             
-            # Adapt transcript with AI
-            adaptation_result = self.adapt_text_with_ai(transcript, username, target_unknown_percentage)
+            transcript = transcript_result["transcript"]
+            
+            # Adapt transcript with AI using NEW CEFR system
+            adaptation_result = self.adapt_text_with_ai(transcript, username, db, target_unknown_percentage)
             
             # Add video metadata
             adaptation_result.update({
@@ -873,7 +404,7 @@ You MUST be extremely aggressive. Use the user's vocabulary list as your primary
             return adaptation_result
             
         except Exception as e:
-            logger.error(f"Error in YouTube AI adaptation: {e}")
+            logging.error(f"Error in YouTube AI adaptation: {e}")
             return {"error": f"YouTube adaptation failed: {str(e)}"}
     
     def generate_learning_explanation(self, unknown_words: List[str], username: str) -> Dict:
@@ -936,7 +467,7 @@ Keep explanations simple and beginner-friendly."""
                 explanations = json.loads(explanations_text)
             except json.JSONDecodeError:
                 # Fallback if JSON parsing fails
-                logger.error(f"Failed to parse JSON: {explanations_text}")
+                logging.error(f"Failed to parse JSON: {explanations_text}")
                 explanations = {
                     unknown_words[0]: {
                         "translation": "Parsing error - çeviri alınamadı",
@@ -952,7 +483,7 @@ Keep explanations simple and beginner-friendly."""
             }
             
         except Exception as e:
-            logger.error(f"Error generating explanations: {e}")
+            logging.error(f"Error generating explanations: {e}")
             return {
                 "error": f"Failed to generate explanations: {str(e)}",
                 "explanations": {}
@@ -1028,7 +559,7 @@ Analyze the text and return the JSON response:"""
                     grammar_analysis = json.loads(grammar_analysis_text)
                 except json.JSONDecodeError:
                     # Fallback if JSON parsing fails
-                    logger.error(f"Failed to parse grammar analysis JSON: {grammar_analysis_text}")
+                    logging.error(f"Failed to parse grammar analysis JSON: {grammar_analysis_text}")
                     grammar_analysis = {
                         "grammar_patterns": [
                             {
@@ -1065,15 +596,91 @@ Analyze the text and return the JSON response:"""
                 }
                 
             except Exception as e:
-                logger.error(f"Error calling Gemini API for grammar analysis: {e}")
+                logging.error(f"Error calling Gemini API for grammar analysis: {e}")
                 return {
                     "error": f"Failed to analyze grammar: {str(e)}",
                     "grammar_analysis": {}
                 }
                 
         except Exception as e:
-            logger.error(f"Error in grammar analysis: {e}")
+            logging.error(f"Error in grammar analysis: {e}")
             return {
                 "error": f"Grammar analysis failed: {str(e)}",
                 "grammar_analysis": {}
-            } 
+            }
+    
+    @staticmethod
+    def _add_word_variations_static(words_set: Set[str], word: str):
+        """
+        Static version of word variations for use in static methods.
+        """
+        if not word or len(word) < 2:
+            return
+            
+        # Orijinal kelimeyi ekle
+        words_set.add(word)
+        
+        # Basit çekim kuralları - sadece temel formlar
+        try:
+            # -ing formu
+            if word.endswith('e') and len(word) > 2:
+                words_set.add(word[:-1] + 'ing')  # use -> using
+            else:
+                words_set.add(word + 'ing')  # work -> working
+            
+            # -ed formu  
+            if word.endswith('e') and len(word) > 2:
+                words_set.add(word + 'd')  # use -> used
+            else:
+                words_set.add(word + 'ed')  # work -> worked
+            
+            # -s/-es formu
+            if word.endswith(('s', 'sh', 'ch', 'x', 'z')) or word.endswith('o'):
+                words_set.add(word + 'es')  # go -> goes
+            elif word.endswith('y') and len(word) > 2:
+                words_set.add(word[:-1] + 'ies')  # try -> tries
+            else:
+                words_set.add(word + 's')  # work -> works
+                
+        except Exception as e:
+            # Hata durumunda sadece orijinal kelimeyi ekle
+            logging.warning(f"Error in word variations for '{word}': {e}")
+            pass
+
+    def _add_word_variations(self, words_set: Set[str], word: str):
+        """
+        Kelimeye ait tüm çekimli hallerini words_set'e ekler.
+        Basitleştirilmiş ve performans odaklı versiyon.
+        """
+        if not word or len(word) < 2:
+            return
+            
+        # Orijinal kelimeyi ekle
+        words_set.add(word)
+        
+        # Basit çekim kuralları - sadece temel formlar
+        try:
+            # -ing formu
+            if word.endswith('e') and len(word) > 2:
+                words_set.add(word[:-1] + 'ing')  # use -> using
+            else:
+                words_set.add(word + 'ing')  # work -> working
+            
+            # -ed formu  
+            if word.endswith('e') and len(word) > 2:
+                words_set.add(word + 'd')  # use -> used
+            else:
+                words_set.add(word + 'ed')  # work -> worked
+            
+            # -s/-es formu
+            if word.endswith(('s', 'sh', 'ch', 'x', 'z')) or word.endswith('o'):
+                words_set.add(word + 'es')  # go -> goes
+            elif word.endswith('y') and len(word) > 2:
+                words_set.add(word[:-1] + 'ies')  # try -> tries
+            else:
+                words_set.add(word + 's')  # work -> works
+                
+        except Exception as e:
+            # Hata durumunda sadece orijinal kelimeyi ekle
+            logging.warning(f"Error in word variations for '{word}': {e}")
+            pass 

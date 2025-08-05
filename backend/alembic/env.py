@@ -7,7 +7,7 @@ from alembic import context
 
 # Import our models
 from app.models.user_vocabulary import Base
-from app.models import *  # Import all models
+from app.models import User, Vocabulary, UserVocabulary, ProcessedTranscript, UrlContent, UnknownWord, WordDefinition
 from app.core.database import get_db
 
 # this is the Alembic Config object, which provides

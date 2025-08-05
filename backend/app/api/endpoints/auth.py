@@ -3,6 +3,7 @@ from fastapi.security import HTTPBearer, HTTPAuthorizationCredentials
 from sqlalchemy.orm import Session
 from pydantic import BaseModel
 from typing import Optional
+from datetime import datetime
 from app.core.database import get_db
 from app.services.auth_service import AuthService
 from app.models.user_vocabulary import User
@@ -26,7 +27,7 @@ class UserResponse(BaseModel):
     username: str
     email: str
     phone_number: str
-    created_at: str
+    created_at: datetime
     
     class Config:
         from_attributes = True
@@ -97,12 +98,28 @@ async def get_current_user_info(
             "username": user.username,
             "email": user.email,
             "phone_number": user.phone_number,
-            "created_at": user.created_at.isoformat()
+            "created_at": user.created_at
         }
     except HTTPException:
         raise
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Failed to get user info: {str(e)}")
+
+@router.get("/user-id/{username}")
+async def get_user_id_by_username(username: str, db: Session = Depends(get_db)):
+    """
+    Get user ID by username for development purposes.
+    """
+    try:
+        user = db.query(User).filter(User.username == username).first()
+        if not user:
+            raise HTTPException(status_code=404, detail="User not found")
+        
+        return {"user_id": user.id, "username": user.username}
+    except HTTPException:
+        raise
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Failed to get user ID: {str(e)}")
 
 @router.post("/logout")
 async def logout():

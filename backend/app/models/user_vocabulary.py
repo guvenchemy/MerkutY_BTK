@@ -19,6 +19,7 @@ class User(Base):
     vocabularies = relationship("UserVocabulary", back_populates="user")
     unknown_words = relationship("UnknownWord", back_populates="user")
     grammar_knowledge = relationship("UserGrammarKnowledge", back_populates="user")
+    added_transcripts = relationship("ProcessedTranscript", foreign_keys="ProcessedTranscript.added_by_user_id")
 
 class Vocabulary(Base):
     __tablename__ = "vocabularies"
@@ -56,10 +57,34 @@ class ProcessedTranscript(Base):
     
     id = Column(Integer, primary_key=True, index=True)
     video_id = Column(String(20), unique=True, index=True, nullable=False)  # YouTube video ID
+    video_url = Column(String(500), nullable=True)
+    video_title = Column(String(500), nullable=True)
+    channel_name = Column(String(200), nullable=True)
+    duration = Column(Integer, nullable=True)  # seconds
+    
+    # Transcript data
     original_text = Column(Text, nullable=False)
+    adapted_text = Column(Text, nullable=True)  # AI adapted version
+    
+    # Metadata
     language = Column(String(10), default="en", nullable=False)
     word_count = Column(Integer, default=0)
+    adapted_word_count = Column(Integer, default=0)
+    
+    # User who first added this transcript
+    added_by_user_id = Column(Integer, ForeignKey("users.id"), nullable=True)
+    added_by_username = Column(String(50), nullable=True)
+    
+    # Usage stats
+    view_count = Column(Integer, default=0)
+    is_active = Column(Boolean, default=True)
+    
+    # Timestamps
     created_at = Column(DateTime(timezone=True), server_default=func.now())
+    updated_at = Column(DateTime(timezone=True), onupdate=func.now())
+    
+    # Relationships
+    added_by = relationship("User", foreign_keys=[added_by_user_id])
 
 # Model for tracking user's grammar pattern knowledge
 class UserGrammarKnowledge(Base):
