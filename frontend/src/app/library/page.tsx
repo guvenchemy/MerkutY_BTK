@@ -186,12 +186,16 @@ export default function LibraryPage() {
     setIsAdapting(true);
     try {
       const token = localStorage.getItem('token');
-      const response = await fetch(`http://localhost:8000/api/library/transcript/${selectedTranscript.id}/adapt?username=${user.username}`, {
+      const response = await fetch(`http://localhost:8000/api/library/transcript/${selectedTranscript.id}/adapt`, {
         method: 'POST',
         headers: {
           'Authorization': `Bearer ${token}`,
           'Content-Type': 'application/json',
         },
+        body: JSON.stringify({ 
+          username: user.username,
+          target_unknown_percentage: 10.0
+        }),
       });
 
       if (response.ok) {
@@ -240,6 +244,61 @@ export default function LibraryPage() {
     localStorage.removeItem('token');
     localStorage.removeItem('user');
     router.push('/login');
+  };
+
+  // ✅ Copy to Clipboard Function
+  const copyToClipboard = async (text: string, type: 'original' | 'adapted') => {
+    try {
+      await navigator.clipboard.writeText(text);
+      console.log(`${type} text copied to clipboard!`);
+      alert(`${type === 'original' ? 'Original' : 'AI Adapted'} text copied to clipboard!`);
+    } catch (err) {
+      console.error('Failed to copy text: ', err);
+      // Fallback for older browsers
+      const textArea = document.createElement('textarea');
+      textArea.value = text;
+      document.body.appendChild(textArea);
+      textArea.select();
+      document.execCommand('copy');
+      document.body.removeChild(textArea);
+      alert(`${type === 'original' ? 'Original' : 'AI Adapted'} text copied to clipboard!`);
+    }
+  };
+
+  // ✅ Download Text as PDF Function  
+  const downloadTextAsPDF = async (text: string, type: 'original' | 'adapted') => {
+    try {
+      const response = await fetch('http://localhost:8000/api/text-analysis/simple-pdf', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({
+          text: text,
+          title: type === 'original' ? 'Original Transcript' : 'AI Adapted Transcript',
+          type: type
+        }),
+      });
+
+      if (response.ok) {
+        const blob = await response.blob();
+        const url = window.URL.createObjectURL(blob);
+        const a = document.createElement('a');
+        a.style.display = 'none';
+        a.href = url;
+        a.download = `${type}_transcript_${new Date().toISOString().split('T')[0]}.pdf`;
+        document.body.appendChild(a);
+        a.click();
+        window.URL.revokeObjectURL(url);
+        document.body.removeChild(a);
+        alert(`${type === 'original' ? 'Original' : 'AI'} transcript PDF downloaded!`);
+      } else {
+        alert('PDF generation failed. Please try again.');
+      }
+    } catch (error) {
+      console.error('PDF download error:', error);
+      alert('PDF download failed. Please try again.');
+    }
   };
 
   const displayTranscripts = searchQuery ? searchResults : transcripts;
@@ -476,7 +535,33 @@ export default function LibraryPage() {
                 <div className="grid grid-cols-1 lg:grid-cols-2 gap-6 p-6">
                   {/* Original Transcript */}
                   <div>
-                    <h3 className="text-lg font-medium text-gray-900 mb-4">📄 Orijinal Transcript</h3>
+                    <div className="flex items-center justify-between mb-4">
+                      <h3 className="text-lg font-medium text-gray-900">📄 Orijinal Transcript</h3>
+                      <div className="flex gap-2">
+                        <div className="relative group">
+                          <button
+                            onClick={() => copyToClipboard(selectedTranscript.original_text, 'original')}
+                            className="bg-blue-600 hover:bg-blue-700 text-white p-2 rounded-lg transition-colors duration-200 text-sm"
+                          >
+                            📋
+                          </button>
+                          <div className="absolute bottom-full mb-2 left-1/2 transform -translate-x-1/2 bg-gray-800 text-white text-xs rounded px-2 py-1 opacity-0 group-hover:opacity-100 transition-opacity duration-200 pointer-events-none whitespace-nowrap">
+                            Copy
+                          </div>
+                        </div>
+                        <div className="relative group">
+                          <button
+                            onClick={() => downloadTextAsPDF(selectedTranscript.original_text, 'original')}
+                            className="bg-red-600 hover:bg-red-700 text-white p-2 rounded-lg transition-colors duration-200 text-sm"
+                          >
+                            📄
+                          </button>
+                          <div className="absolute bottom-full mb-2 left-1/2 transform -translate-x-1/2 bg-gray-800 text-white text-xs rounded px-2 py-1 opacity-0 group-hover:opacity-100 transition-opacity duration-200 pointer-events-none whitespace-nowrap">
+                            PDF
+                          </div>
+                        </div>
+                      </div>
+                    </div>
                     <div className="bg-gray-50 rounded-lg p-4 max-h-96 overflow-y-auto">
                       <p className="text-sm text-gray-700 whitespace-pre-wrap">
                         {selectedTranscript.original_text}
@@ -488,13 +573,41 @@ export default function LibraryPage() {
                   <div>
                     <div className="flex items-center justify-between mb-4">
                       <h3 className="text-lg font-medium text-gray-900">🤖 AI Adaptasyonu</h3>
-                      <button
-                        onClick={adaptTranscriptForUser}
-                        disabled={isAdapting}
-                        className="px-4 py-2 bg-green-600 text-white rounded-lg hover:bg-green-700 disabled:opacity-50 transition-colors text-sm"
-                      >
-                        {isAdapting ? 'Adaptasyon yapılıyor...' : 'Seviyeme Göre Adapt Et'}
-                      </button>
+                      <div className="flex items-center gap-2">
+                        {(adaptedText || selectedTranscript.adapted_text) && (
+                          <div className="flex gap-2">
+                            <div className="relative group">
+                              <button
+                                onClick={() => copyToClipboard(adaptedText || selectedTranscript.adapted_text, 'adapted')}
+                                className="bg-blue-600 hover:bg-blue-700 text-white p-2 rounded-lg transition-colors duration-200 text-sm"
+                              >
+                                📋
+                              </button>
+                              <div className="absolute bottom-full mb-2 left-1/2 transform -translate-x-1/2 bg-gray-800 text-white text-xs rounded px-2 py-1 opacity-0 group-hover:opacity-100 transition-opacity duration-200 pointer-events-none whitespace-nowrap">
+                                Copy
+                              </div>
+                            </div>
+                            <div className="relative group">
+                              <button
+                                onClick={() => downloadTextAsPDF(adaptedText || selectedTranscript.adapted_text, 'adapted')}
+                                className="bg-red-600 hover:bg-red-700 text-white p-2 rounded-lg transition-colors duration-200 text-sm"
+                              >
+                                📄
+                              </button>
+                              <div className="absolute bottom-full mb-2 left-1/2 transform -translate-x-1/2 bg-gray-800 text-white text-xs rounded px-2 py-1 opacity-0 group-hover:opacity-100 transition-opacity duration-200 pointer-events-none whitespace-nowrap">
+                                PDF
+                              </div>
+                            </div>
+                          </div>
+                        )}
+                        <button
+                          onClick={adaptTranscriptForUser}
+                          disabled={isAdapting}
+                          className="px-4 py-2 bg-green-600 text-white rounded-lg hover:bg-green-700 disabled:opacity-50 transition-colors text-sm"
+                        >
+                          {isAdapting ? 'Adaptasyon yapılıyor...' : 'Seviyeme Göre Adapt Et'}
+                        </button>
+                      </div>
                     </div>
                     <div className="bg-blue-50 rounded-lg p-4 max-h-96 overflow-y-auto">
                       <p className="text-sm text-gray-700 whitespace-pre-wrap">

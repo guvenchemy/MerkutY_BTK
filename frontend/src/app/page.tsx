@@ -3,7 +3,8 @@
 import { useState, useEffect } from 'react';
 import { useRouter } from 'next/navigation';
 import VocabularyUpload from '../components/VocabularyUpload';
-import TextAnalysis from '../components/TextAnalysis';
+import { SmartFeaturesDemo } from '../components/smart';
+import Library from '../components/Library';
 
 // Types for our API responses
 interface UserStats {
@@ -104,8 +105,6 @@ export default function Home() {
   
   // Authentication State
   const [isLoggedIn, setIsLoggedIn] = useState(false);
-  const [loginUsername, setLoginUsername] = useState('');
-  const [showLoginForm, setShowLoginForm] = useState(true);
   const [user, setUser] = useState<any>(null);
   
   // User Management State
@@ -130,29 +129,72 @@ export default function Home() {
   const [isLoadingExplanation, setIsLoadingExplanation] = useState(false);
   const [isAddingWord, setIsAddingWord] = useState(false);
   
-  // Settings State
-  const [targetUnknownPercentage, setTargetUnknownPercentage] = useState(10);
+  // Settings State - Removed target percentage (not needed)
 
   // Tab State
-  const [activeTab, setActiveTab] = useState<'adaptation' | 'analysis'>('adaptation');
+  const [activeTab, setActiveTab] = useState<'adaptation' | 'smart' | 'library'>('adaptation');
+  const [smartAnalysisText, setSmartAnalysisText] = useState<string>('');
 
-  // Grammar Analysis State
+  // Grammar Analysis State - Now handled in Smart AI Teacher tab
   const [grammarAnalysisResult, setGrammarAnalysisResult] = useState<GrammarAnalysisResult | null>(null);
-  const [isLoadingGrammarAnalysis, setIsLoadingGrammarAnalysis] = useState(false);
-  const [grammarAnalysisError, setGrammarAnalysisError] = useState('');
 
-  // Handle login
-  const handleLogin = async (e: React.FormEvent) => {
-    e.preventDefault();
-    if (!loginUsername.trim()) {
-      alert('Please enter a username');
-      return;
+  // ✅ Copy to Clipboard Function
+  const copyToClipboard = async (text: string, type: 'original' | 'adapted') => {
+    try {
+      await navigator.clipboard.writeText(text);
+      // You could add a toast notification here
+      console.log(`${type} text copied to clipboard!`);
+      alert(`${type === 'original' ? 'Original' : 'AI'} text copied to clipboard!`);
+    } catch (err) {
+      console.error('Failed to copy text: ', err);
+      // Fallback for older browsers
+      const textArea = document.createElement('textarea');
+      textArea.value = text;
+      document.body.appendChild(textArea);
+      textArea.select();
+      document.execCommand('copy');
+      document.body.removeChild(textArea);
+      alert(`${type === 'original' ? 'Original' : 'AI'} text copied to clipboard!`);
     }
-    
-    setCurrentUser(loginUsername.trim());
-    setIsLoggedIn(true);
-    setShowLoginForm(false);
   };
+
+  // ✅ Download Text as PDF Function  
+  const downloadTextAsPDF = async (text: string, type: 'original' | 'adapted') => {
+    try {
+      const response = await fetch('http://localhost:8000/api/text-analysis/simple-pdf', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({
+          text: text,
+          title: type === 'original' ? 'Original Text' : 'AI Adapted Text',
+          type: type
+        }),
+      });
+
+      if (response.ok) {
+        const blob = await response.blob();
+        const url = window.URL.createObjectURL(blob);
+        const a = document.createElement('a');
+        a.style.display = 'none';
+        a.href = url;
+        a.download = `${type}_text_${new Date().toISOString().split('T')[0]}.pdf`;
+        document.body.appendChild(a);
+        a.click();
+        window.URL.revokeObjectURL(url);
+        document.body.removeChild(a);
+        alert(`${type === 'original' ? 'Original' : 'AI'} text PDF downloaded!`);
+      } else {
+        alert('PDF generation failed. Please try again.');
+      }
+    } catch (error) {
+      console.error('PDF download error:', error);
+      alert('PDF download failed. Please try again.');
+    }
+  };
+
+  // No demo login - redirect to proper auth
 
   const handleLogout = () => {
     // Clear localStorage
@@ -165,7 +207,6 @@ export default function Home() {
     // Reset state
     setCurrentUser('');
     setIsLoggedIn(false);
-    setShowLoginForm(true);
     setUserStats(null);
     setOriginalText('');
     setAdaptedText('');
@@ -190,7 +231,6 @@ export default function Home() {
         setUser(user);
         setCurrentUser(user.username);
         setIsLoggedIn(true);
-        setShowLoginForm(false);
         
         // Clear state on refresh - don't restore from localStorage
         setOriginalText('');
@@ -206,6 +246,7 @@ export default function Home() {
       }
     } else {
       // Redirect to login if not authenticated
+      console.log('No valid token found, redirecting to login');
       router.push('/login');
     }
   }, [router]);
@@ -283,17 +324,23 @@ export default function Home() {
       
       setOriginalText(transcriptData.original_text);
       
-      // If this is a new transcript (not from library), create AI adaptation
+      // Always try to create/get AI adaptation
       let adaptedText = transcriptData.adapted_text || '';
-      if (!transcriptData.from_library) {
+      
+      // If we don't have adapted text, or want to regenerate, create new adaptation
+      if (!adaptedText || !transcriptData.from_library) {
         try {
-          // Create AI adaptation for new transcript using the library adaptation endpoint
-          const adaptResponse = await fetch(`http://localhost:8000/api/library/transcript/${transcriptData.video_id}/adapt?username=${currentUser}`, {
+          // Create AI adaptation using the library adaptation endpoint
+          const adaptResponse = await fetch(`http://localhost:8000/api/library/transcript/video/${transcriptData.video_id}/adapt`, {
             method: 'POST',
             headers: {
               'Authorization': `Bearer ${token}`,
               'Content-Type': 'application/json',
             },
+            body: JSON.stringify({ 
+              username: currentUser,
+              target_unknown_percentage: 10.0
+            }),
           });
           
           if (adaptResponse.ok) {
@@ -314,31 +361,105 @@ export default function Home() {
       localStorage.setItem('adaptedText', adaptedText);
       localStorage.setItem('youtubeUrl', url);
       
+      // Analyze original text to get word status for coloring
+      let originalWordAnalysis = null;
+      let originalAnalysis = {
+        total_words: transcriptData.word_count || 0,
+        known_words: 0,
+        unknown_words: 0,
+        known_percentage: 0,
+        unknown_percentage: 0,
+        difficulty_level: 'unknown'
+      };
+      
+      try {
+        const analysisResponse = await fetch('http://localhost:8000/api/text-analysis/analyze', {
+          method: 'POST',
+          headers: { 
+            'Content-Type': 'application/json',
+            'Authorization': `Bearer ${token}`,
+          },
+          body: JSON.stringify({
+            text: transcriptData.original_text,
+            username: currentUser
+          }),
+        });
+        
+        if (analysisResponse.ok) {
+          const analysisData = await analysisResponse.json();
+          if (analysisData.success && analysisData.data) {
+            originalWordAnalysis = analysisData.data.word_analysis;
+            originalAnalysis = {
+              total_words: analysisData.data.analysis?.total_unique_words_in_text || 0,
+              known_words: analysisData.data.analysis?.known_words_in_text || 0,
+              unknown_words: analysisData.data.analysis?.unknown_words_in_text || 0,
+              known_percentage: analysisData.data.analysis?.known_percentage || 0,
+              unknown_percentage: analysisData.data.analysis?.unknown_percentage || 0,
+              difficulty_level: analysisData.data.analysis?.text_difficulty || 'unknown'
+            };
+          }
+        }
+      } catch (error) {
+        console.error('Failed to analyze original text:', error);
+      }
+      
+      // Analyze adapted text if available
+      let adaptedWordAnalysis = null;
+      let adaptedAnalysis = {
+        total_words: adaptedText ? adaptedText.split(' ').length : 0,
+        known_words: 0,
+        unknown_words: 0,
+        known_percentage: 0,
+        unknown_percentage: 0,
+        difficulty_level: 'unknown'
+      };
+
+      if (adaptedText && adaptedText.trim()) {
+        try {
+          const adaptedAnalysisResponse = await fetch('http://localhost:8000/api/text-analysis/analyze', {
+            method: 'POST',
+            headers: { 
+              'Content-Type': 'application/json',
+              'Authorization': `Bearer ${token}`,
+            },
+            body: JSON.stringify({
+              text: adaptedText,
+              username: currentUser
+            }),
+          });
+          
+          if (adaptedAnalysisResponse.ok) {
+            const adaptedAnalysisData = await adaptedAnalysisResponse.json();
+            if (adaptedAnalysisData.success && adaptedAnalysisData.data) {
+              adaptedWordAnalysis = adaptedAnalysisData.data.word_analysis;
+              adaptedAnalysis = {
+                total_words: adaptedAnalysisData.data.analysis?.total_unique_words_in_text || 0,
+                known_words: adaptedAnalysisData.data.analysis?.known_words_in_text || 0,
+                unknown_words: adaptedAnalysisData.data.analysis?.unknown_words_in_text || 0,
+                known_percentage: adaptedAnalysisData.data.analysis?.known_percentage || 0,
+                unknown_percentage: adaptedAnalysisData.data.analysis?.unknown_percentage || 0,
+                difficulty_level: adaptedAnalysisData.data.analysis?.text_difficulty || 'unknown'
+              };
+            }
+          }
+        } catch (error) {
+          console.error('Failed to analyze adapted text:', error);
+        }
+      }
+
       // Create adaptation result object for compatibility
       const adaptationResult = {
         original_text: transcriptData.original_text,
         adapted_text: adaptedText,
-        original_analysis: {
-          total_words: transcriptData.word_count || 0,
-          known_words: 0,
-          unknown_words: 0,
-          known_percentage: 0,
-          unknown_percentage: 0,
-          difficulty_level: 'unknown'
-        },
-        adapted_analysis: {
-          total_words: adaptedText ? adaptedText.split(' ').length : 0,
-          known_words: 0,
-          unknown_words: 0,
-          known_percentage: 0,
-          unknown_percentage: 0,
-          difficulty_level: 'unknown'
-        },
+        original_word_analysis: originalWordAnalysis,
+        adapted_word_analysis: adaptedWordAnalysis,
+        original_analysis: originalAnalysis,
+        adapted_analysis: adaptedAnalysis,
         user_vocabulary_size: 0,
         adaptation_method: transcriptData.from_library ? 'library' : 'gemini',
         improvement: {
-          unknown_percentage_change: 0,
-          closer_to_target: false
+          unknown_percentage_change: originalAnalysis.unknown_percentage - adaptedAnalysis.unknown_percentage,
+          closer_to_target: adaptedAnalysis.unknown_percentage < originalAnalysis.unknown_percentage
         }
       };
       
@@ -376,10 +497,8 @@ export default function Home() {
             };
             setAdaptationResult(updatedResult);
             
-            // Also reload word analysis to ensure proper display
-            setTimeout(() => {
-              reloadWordAnalysis();
-            }, 1000);
+            // Reload word analysis immediately to ensure proper display
+            reloadWordAnalysis();
           }
         }
       } catch (error) {
@@ -506,26 +625,31 @@ export default function Home() {
     setWordExplanation(null);
     
     try {
-      // Clean the word/phrase but preserve spaces for phrases
-      const cleanText = wordOrPhrase.replace(/[^\w\s]/g, ' ').replace(/\s+/g, ' ').trim().toLowerCase();
+      // Clean the word/phrase - remove punctuation and extra spaces
+      const cleanText = wordOrPhrase.replace(/[^\w\s]/g, '').replace(/\s+/g, ' ').trim().toLowerCase();
       
-      const response = await fetch('http://localhost:8000/api/adaptation/explain', {
+      // Use the new smart API endpoint that actually works
+      const response = await fetch('http://localhost:8000/api/smart/word-explanation', {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
         },
         body: JSON.stringify({ 
-          words: [cleanText], 
-          username: currentUser 
+          word: cleanText
         }),
       });
 
       if (response.ok) {
         const data = await response.json();
-        console.log('Explanation response:', data);
+        console.log('Smart API explanation response:', data);
         
-        if (data.explanations && data.explanations[cleanText]) {
-          setWordExplanation(data.explanations[cleanText]);
+        if (data.success && data.data) {
+          // Convert new API format to old modal format
+          setWordExplanation({
+            translation: data.data.turkish_meaning || "Çeviri bulunamadı",
+            example: data.data.english_example || `Example: "${cleanText}" is used in sentences.`,
+            example_explanation: data.data.example_translation || "Bu kelime/kelime grubu için açıklama bulunamadı."
+          });
         } else {
           // Fallback explanation
           setWordExplanation({
@@ -592,42 +716,17 @@ export default function Home() {
   };
 
   const handleGrammarAnalysis = async () => {
-    const textToAnalyze = originalText || adaptedText;
+    // Use adapted text first (shorter, user-appropriate), fallback to original
+    const textToAnalyze = adaptedText || originalText;
     
     if (!textToAnalyze.trim()) {
       alert('Please provide some text to analyze (either original or adapted text)');
       return;
     }
 
-    setIsLoadingGrammarAnalysis(true);
-    setGrammarAnalysisError('');
-    setGrammarAnalysisResult(null);
-
-    try {
-      const response = await fetch('http://localhost:8000/api/adaptation/grammar-analysis', {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-        },
-        body: JSON.stringify({
-          text: textToAnalyze,
-          username: currentUser
-        }),
-      });
-
-      if (!response.ok) {
-        const errorData = await response.json();
-        throw new Error(errorData.detail || 'Failed to analyze grammar.');
-      }
-
-      const data = await response.json();
-      setGrammarAnalysisResult(data);
-      
-    } catch (err: any) {
-      setGrammarAnalysisError(err.message);
-    } finally {
-      setIsLoadingGrammarAnalysis(false);
-    }
+    // Set the text for smart analysis and switch to Smart AI Teacher tab
+    setSmartAnalysisText(textToAnalyze);
+    setActiveTab('smart');
   };
 
   const isWordKnown = (word: string, wordAnalysis?: { word_status: { [key: string]: boolean } }): boolean => {
@@ -660,31 +759,15 @@ export default function Home() {
           const cleanWord = part.toLowerCase().trim();
           const known = isWordKnown(cleanWord, wordAnalysis);
           
-          // Color coding based on knowledge - only color unknown words
-          let wordClass = "cursor-pointer px-1 rounded transition-colors duration-200 ";
-          
-          if (isAdapted) {
-            // In adapted text: No color for known, Pink for unknown (learning targets)
-            if (known) {
-              wordClass += "hover:bg-gray-600 hover:text-white";
-            } else {
-              wordClass += "hover:bg-pink-600 hover:text-white bg-pink-500 bg-opacity-50 text-pink-200 font-bold";
-            }
-          } else {
-            // In original text: No color for known, Yellow for unknown
-            if (known) {
-              wordClass += "hover:bg-gray-600 hover:text-white";
-            } else {
-              wordClass += "hover:bg-yellow-600 hover:text-white bg-yellow-500 bg-opacity-40 text-yellow-200";
-            }
-          }
+          // Simple clickable styling - NO COLOR CODING
+          let wordClass = "cursor-pointer px-1 rounded transition-colors duration-200 hover:bg-gray-600 hover:text-white";
           
           return (
             <span
               key={index}
               className={wordClass}
               onClick={() => handleWordClick(cleanWord)}
-              title={`${known ? 'Known' : 'Unknown'} word - Click for explanation`}
+              title="Click to mark word as known/unknown/ignore"
             >
               {part}
             </span>
@@ -695,10 +778,10 @@ export default function Home() {
   };
 
   return (
-    <main className="flex min-h-screen flex-col items-center p-4 md:p-12 bg-gray-900 text-white font-sans">
-      <div className="w-full max-w-7xl">
+    <main className="flex min-h-screen flex-col items-center p-0 bg-gray-900 text-white font-sans">
+      <div className="w-full">
         {/* Header */}
-        <header className="text-center mb-8">
+        <header className="text-center mb-8 px-8">
           <h1 className="text-4xl md:text-5xl font-extrabold text-teal-400">Nexus</h1>
           <p className="text-lg text-gray-400 mt-2">
             AI-Powered Language Learning with i+1 Theory
@@ -710,12 +793,6 @@ export default function Home() {
               <div className="flex items-center justify-center gap-4">
                 <span className="text-teal-400 font-bold">👤 {currentUser}</span>
                 <button
-                  onClick={() => router.push('/library')}
-                  className="bg-blue-600 hover:bg-blue-700 text-white px-4 py-2 rounded-lg text-sm"
-                >
-                  📚 Kütüphane
-                </button>
-                <button
                   onClick={handleLogout}
                   className="bg-red-600 hover:bg-red-700 text-white px-4 py-2 rounded-lg text-sm"
                 >
@@ -724,7 +801,7 @@ export default function Home() {
               </div>
             ) : (
               <button
-                onClick={() => setShowLoginForm(true)}
+                onClick={() => router.push('/login')}
                 className="bg-teal-600 hover:bg-teal-700 text-white px-6 py-2 rounded-lg text-sm font-bold"
               >
                 🔑 Login
@@ -733,42 +810,13 @@ export default function Home() {
           </div>
         </header>
 
-        {/* Login Form */}
-        {showLoginForm && !isLoggedIn && (
-          <div className="bg-gray-800 rounded-lg p-6 max-w-md mx-auto mb-8">
-            <h2 className="text-2xl font-bold text-teal-400 mb-4 text-center">🔑 Login to Nexus</h2>
-            <form onSubmit={handleLogin} className="space-y-4">
-              <div>
-                <label className="block text-sm font-medium text-gray-300 mb-2">
-                  Username
-                </label>
-                <input
-                  type="text"
-                  value={loginUsername}
-                  onChange={(e) => setLoginUsername(e.target.value)}
-                  className="w-full px-3 py-2 bg-gray-700 border border-gray-600 rounded-lg text-white placeholder-gray-400 focus:outline-none focus:border-teal-500"
-                  placeholder="Enter your username"
-                  required
-                />
-              </div>
-              <button
-                type="submit"
-                className="w-full bg-teal-600 hover:bg-teal-700 text-white font-bold py-2 px-4 rounded-lg transition-colors duration-300"
-              >
-                🚀 Start Learning
-              </button>
-            </form>
-            <div className="mt-4 text-center text-sm text-gray-400">
-              💡 Enter any username to start. New users will be created automatically.
-            </div>
-          </div>
-        )}
+        {/* No demo login - redirect to proper auth */}
 
         {/* Main App Content - Only show when logged in */}
         {isLoggedIn && (
           <>
             {/* Tab Navigation */}
-            <div className="mb-6">
+            <div className="mb-6 px-0">
               <div className="flex justify-center border-b border-gray-700">
                 <button
                   onClick={() => setActiveTab('adaptation')}
@@ -781,337 +829,224 @@ export default function Home() {
                   📚 Metin Adaptasyonu
                 </button>
                 <button
-                  onClick={() => setActiveTab('analysis')}
+                  onClick={() => setActiveTab('smart')}
                   className={`px-6 py-3 font-medium text-sm transition-colors ${
-                    activeTab === 'analysis'
+                    activeTab === 'smart'
                       ? 'text-teal-400 border-b-2 border-teal-400'
                       : 'text-gray-400 hover:text-gray-200'
                   }`}
                 >
-                  🔍 Metin Analizi
+                  🧠 AI Öğretmen
                 </button>
+                {isLoggedIn && (
+                  <button
+                    onClick={() => setActiveTab('library')}
+                    className={`px-6 py-3 font-medium text-sm transition-colors ${
+                      activeTab === 'library'
+                        ? 'text-blue-400 border-b-2 border-blue-400'
+                        : 'text-gray-400 hover:text-blue-300'
+                    }`}
+                  >
+                    📚 Kütüphane
+                  </button>
+                )}
               </div>
             </div>
 
             {/* Tab Content */}
-            {activeTab === 'adaptation' && (
-              <div>
-            {userStats && (
-              <div className="mt-4 bg-gray-800 rounded-lg p-4 max-w-4xl mx-auto">
-                <div className="flex flex-wrap justify-center gap-4 text-sm mb-3">
-                  <span className="bg-teal-600 px-3 py-1 rounded-full">
-                    👤 {userStats.username}
-                  </span>
-                  <span className="bg-blue-600 px-3 py-1 rounded-full">
-                    📚 {userStats.vocabulary_size} words
-                  </span>
-                  <span className="bg-purple-600 px-3 py-1 rounded-full">
-                    🎯 {userStats.level}
-                  </span>
-                  <span className="bg-green-600 px-3 py-1 rounded-full">
-                    🧠 i+1 Ready: {userStats.krashen_readiness.can_handle_i_plus_1 ? '✅' : '❌'}
-                  </span>
-                </div>
-                
-                {/* Detailed Vocabulary Stats */}
-                {userStats.vocabulary_stats && (
-                  <div className="border-t border-gray-700 pt-3">
-                    <h4 className="text-center text-gray-300 font-bold mb-2">📊 Vocabulary Management</h4>
-                    <div className="flex flex-wrap justify-center gap-3 text-xs">
-                      <span className="bg-green-600 px-2 py-1 rounded">
-                        ✅ Known: {userStats.vocabulary_stats.known_words}
-                      </span>
-                      <span className="bg-yellow-500 bg-opacity-40 text-yellow-200 px-2 py-1 rounded">
-                        ❌ Unknown: {userStats.vocabulary_stats.unknown_words}
-                      </span>
-                      <span className="bg-gray-600 px-2 py-1 rounded">
-                        ⏭️ Ignored: {userStats.vocabulary_stats.ignored_words}
-                      </span>
-                      <span className="bg-blue-600 px-2 py-1 rounded">
-                        📝 Total Managed: {userStats.vocabulary_stats.total_managed}
-                      </span>
+            {activeTab === 'library' ? (
+              <Library currentUser={currentUser} userLevel={userStats?.level || 'A1'} />
+            ) : activeTab === 'adaptation' && (
+              <div className="flex flex-col lg:flex-row gap-8 px-0">
+                {/* Sol Taraf - Kontroller */}
+                <div className="w-full lg:w-1/3 space-y-6 px-8">
+                  {/* User Stats */}
+                  {userStats && (
+                    <div className="bg-gray-800 rounded-lg p-6">
+                      <div className="flex flex-wrap justify-center gap-4 text-sm mb-3">
+                        <span className="bg-teal-600 px-3 py-1 rounded-full">
+                          👤 {userStats.username}
+                        </span>
+                        <span className="bg-blue-600 px-3 py-1 rounded-full">
+                          📚 {userStats.vocabulary_size} words
+                        </span>
+                        <span className="bg-purple-600 px-3 py-1 rounded-full">
+                          🎯 {userStats.level}
+                        </span>
+                        <span className="bg-green-600 px-3 py-1 rounded-full">
+                          🧠 i+1 Ready: {userStats.krashen_readiness.can_handle_i_plus_1 ? '✅' : '❌'}
+                        </span>
+                      </div>
+                      
+                      {/* Detailed Vocabulary Stats */}
+                      {userStats.vocabulary_stats && (
+                        <div className="border-t border-gray-700 pt-3">
+                          <h4 className="text-center text-gray-300 font-bold mb-2">📊 Vocabulary Management</h4>
+                          <div className="flex flex-wrap justify-center gap-3 text-xs">
+                            <span className="bg-green-600 px-2 py-1 rounded">
+                              ✅ Known: {userStats.vocabulary_stats.known_words}
+                            </span>
+                            <span className="bg-yellow-500 bg-opacity-40 text-yellow-200 px-2 py-1 rounded">
+                              ❌ Unknown: {userStats.vocabulary_stats.unknown_words}
+                            </span>
+                            <span className="bg-gray-600 px-2 py-1 rounded">
+                              ⏭️ Ignored: {userStats.vocabulary_stats.ignored_words}
+                            </span>
+                            <span className="bg-blue-600 px-2 py-1 rounded">
+                              📝 Total Managed: {userStats.vocabulary_stats.total_managed}
+                            </span>
+                          </div>
+                        </div>
+                      )}
+                    </div>
+                  )}
+
+                  {/* Word Interaction Guide */}
+                  <div className="bg-gray-800 rounded-lg p-6">
+                    <h3 className="text-lg font-bold text-teal-400 mb-3 text-center">💡 How to Use</h3>
+                    <div className="text-center text-sm text-gray-300">
+                      Click any word to mark it as <span className="text-green-400 font-bold">Known</span>, <span className="text-red-400 font-bold">Unknown</span>, or <span className="text-gray-400 font-bold">Ignore</span>
+                    </div>
+                    <div className="mt-2 text-center text-xs text-gray-400">
+                      Select text with mouse for detailed explanations
                     </div>
                   </div>
-                )}
-              </div>
-            )}
 
-            {/* Color Legend */}
-            <div className="bg-gray-800 rounded-lg p-4 mb-6 max-w-4xl mx-auto">
-              <h3 className="text-lg font-bold text-teal-400 mb-3 text-center">🎨 Color Guide</h3>
-              <div className="grid grid-cols-2 gap-4 text-sm">
-                <div>
-                  <h4 className="font-bold text-gray-300 mb-2">Original Text:</h4>
-                  <div className="space-y-1">
-                    <div className="flex items-center gap-2">
-                      <span className="bg-yellow-500 bg-opacity-40 text-yellow-200 px-2 py-1 rounded">Unknown words</span>
-                      <span className="text-gray-400">- Learn these</span>
-                    </div>
+                  {/* Vocabulary Upload Section */}
+                  <div>
+                    <VocabularyUpload 
+                      username={currentUser} 
+                      onUploadSuccess={loadUserStats}
+                    />
                   </div>
-                </div>
-                <div>
-                  <h4 className="font-bold text-gray-300 mb-2">Adapted Text:</h4>
-                  <div className="space-y-1">
-                    <div className="flex items-center gap-2">
-                      <span className="bg-pink-500 bg-opacity-50 text-pink-200 px-2 py-1 rounded font-bold">Learning targets</span>
-                      <span className="text-gray-400">- Focus here!</span>
-                    </div>
-                  </div>
-                </div>
-              </div>
-              <div className="mt-3 text-center text-xs text-gray-400">
-                💡 Click any word OR select text with mouse for explanations
-              </div>
-            </div>
-
-            {/* Vocabulary Upload Section */}
-            <div className="max-w-4xl mx-auto">
-              <VocabularyUpload 
-                username={currentUser} 
-                onUploadSuccess={loadUserStats}
-              />
-            </div>
-
-            {/* Settings Panel */}
-            <div className="bg-gray-800 rounded-lg p-4 mb-6 max-w-4xl mx-auto">
-              <div className="flex flex-wrap justify-center gap-4 items-center">
-                <div className="flex items-center gap-2">
-                  <span className="text-sm text-teal-400 font-bold">
-                    🤖 AI-Powered Adaptation
-                  </span>
-                </div>
-                
-                <div className="flex items-center gap-2">
-                  <label className="text-sm text-gray-300">Target Unknown %:</label>
-                  <input
-                    type="range"
-                    min="5"
-                    max="20"
-                    value={targetUnknownPercentage}
-                    onChange={(e) => setTargetUnknownPercentage(Number(e.target.value))}
-                    className="w-20"
-                  />
-                  <span className="text-teal-400 text-sm font-bold">{targetUnknownPercentage}%</span>
-                </div>
-              </div>
-            </div>
-            
-            {/* YouTube Input Form */}
-            <form onSubmit={handleYouTubeSubmit} className="w-full max-w-3xl mx-auto mb-8">
-              <div className="flex items-center bg-gray-800 rounded-lg p-2 shadow-lg">
-                <input
-                  className="appearance-none bg-transparent border-none w-full text-gray-200 placeholder-gray-500 mr-3 py-2 px-4 leading-tight focus:outline-none"
-                  type="text"
-                  placeholder="Enter a YouTube URL for i+1 adaptation..."
-                  aria-label="YouTube URL"
-                  value={url}
-                  onChange={(e) => setUrl(e.target.value)}
-                />
-                <button
-                  className="flex-shrink-0 bg-teal-500 hover:bg-teal-600 border-teal-500 hover:border-teal-600 text-sm font-bold border-4 text-white py-2 px-6 rounded-lg transition-colors duration-300 disabled:opacity-50"
-                  type="submit"
-                  disabled={isLoading}
-                >
-                  {isLoading ? '🔄 Processing...' : '🎯 Adapt to i+1'}
-                </button>
-              </div>
-            </form>
-
-            {/* Grammar Analysis Button */}
-            {(originalText || adaptedText) && (
-              <div className="w-full max-w-3xl mx-auto mb-8">
-                <button
-                  onClick={handleGrammarAnalysis}
-                  disabled={isLoadingGrammarAnalysis}
-                  className="w-full bg-purple-600 hover:bg-purple-700 disabled:bg-purple-800 text-white font-bold py-3 px-6 rounded-lg transition-colors duration-300 disabled:opacity-50"
-                >
-                  {isLoadingGrammarAnalysis ? '🔍 Analyzing Grammar...' : '📚 Analyze Grammar & Learn Rules'}
-                </button>
-                <p className="text-center text-sm text-gray-400 mt-2">
-                  💡 Get detailed grammar explanations and learning tips for the text
-                </p>
-              </div>
-            )}
-
-            {grammarAnalysisError && (
-              <div className="bg-red-800 border border-red-600 text-red-200 px-4 py-3 rounded max-w-3xl mx-auto mb-6">
-                ❌ Grammar Analysis Error: {grammarAnalysisError}
-              </div>
-            )}
-
-            {/* Grammar Analysis Results */}
-            {grammarAnalysisResult && (
-              <div className="mb-6 max-w-4xl mx-auto">
-                <div className="bg-gray-800 rounded-lg p-6">
-                  <h3 className="text-xl font-bold text-purple-400 mb-4 text-center">
-                    📚 Grammar Analysis Results
-                    <span className="block text-sm font-normal text-gray-400 mt-1">
-                      {grammarAnalysisResult.total_patterns} patterns • {grammarAnalysisResult.learning_points} learning points
-                    </span>
-                  </h3>
                   
-                  {/* Grammar Patterns */}
-                  {grammarAnalysisResult.grammar_analysis.grammar_patterns.length > 0 && (
-                    <div className="mb-6">
-                      <h4 className="text-lg font-bold text-teal-400 mb-3">🎯 Grammar Patterns Found</h4>
-                      <div className="grid gap-4">
-                        {grammarAnalysisResult.grammar_analysis.grammar_patterns.map((pattern, index) => (
-                          <div key={index} className="bg-gray-700 rounded-lg p-4">
-                            <div className="flex items-center justify-between mb-2">
-                              <h5 className="font-bold text-yellow-400">{pattern.pattern}</h5>
-                              <span className={`px-2 py-1 rounded text-xs ${
-                                pattern.difficulty === 'Beginner' ? 'bg-green-600' :
-                                pattern.difficulty === 'Intermediate' ? 'bg-yellow-600' :
-                                'bg-red-600'
-                              }`}>
-                                {pattern.difficulty}
-                              </span>
+                  {/* YouTube Input Form */}
+                  <form onSubmit={handleYouTubeSubmit} className="w-full">
+                    <div className="flex items-center bg-gray-800 rounded-lg p-4 shadow-lg">
+                      <input
+                        className="appearance-none bg-transparent border-none w-full text-gray-200 placeholder-gray-500 mr-3 py-2 px-4 leading-tight focus:outline-none"
+                        type="text"
+                        placeholder="Enter a YouTube URL for i+1 adaptation..."
+                        aria-label="YouTube URL"
+                        value={url}
+                        onChange={(e) => setUrl(e.target.value)}
+                      />
+                      <button
+                        className="flex-shrink-0 bg-teal-500 hover:bg-teal-600 border-teal-500 hover:border-teal-600 text-sm font-bold border-4 text-white py-2 px-6 rounded-lg transition-colors duration-300 disabled:opacity-50"
+                        type="submit"
+                        disabled={isLoading}
+                      >
+                        {isLoading ? '🔄 Processing...' : '🎯 Adapt to i+1'}
+                      </button>
+                    </div>
+                  </form>
+
+
+
+                  {/* Error Display */}
+                  {error && (
+                    <div className="bg-red-800 border border-red-600 text-red-200 px-4 py-3 rounded">
+                      ❌ {error}
+                    </div>
+                  )}
+                </div>
+
+                {/* Sağ Taraf - Text Display (Her zaman görünür) */}
+                <div className="w-full lg:w-2/3 px-8">
+                  <div className="flex flex-col lg:flex-row space-y-8 lg:space-y-0 lg:space-x-8">
+                    <div className="w-full lg:w-1/2 flex flex-col">
+                      <div className="flex items-center justify-between mb-4">
+                        <h2 className="text-2xl font-bold text-center text-gray-300 flex-1">
+                          📝 Original Text
+                        </h2>
+                        {originalText && (
+                          <div className="ml-3 flex gap-2">
+                            <div className="relative group">
+                              <button
+                                onClick={() => copyToClipboard(originalText, 'original')}
+                                className="bg-blue-600 hover:bg-blue-700 text-white p-2 rounded-lg transition-colors duration-200"
+                              >
+                                📋
+                              </button>
+                              <div className="absolute bottom-full mb-2 left-1/2 transform -translate-x-1/2 bg-gray-800 text-white text-xs rounded px-2 py-1 opacity-0 group-hover:opacity-100 transition-opacity duration-200 pointer-events-none whitespace-nowrap">
+                                Copy
+                              </div>
                             </div>
-                            <p className="text-gray-300 mb-3">{pattern.explanation}</p>
-                            <div className="mb-3">
-                              <span className="font-bold text-blue-400 text-sm">Rules:</span>
-                              <ul className="list-disc list-inside text-gray-300 text-sm mt-1">
-                                {pattern.rules.map((rule, ruleIndex) => (
-                                  <li key={ruleIndex}>{rule}</li>
-                                ))}
-                              </ul>
+                            <div className="relative group">
+                              <button
+                                onClick={() => downloadTextAsPDF(originalText, 'original')}
+                                className="bg-red-600 hover:bg-red-700 text-white p-2 rounded-lg transition-colors duration-200"
+                              >
+                                📄
+                              </button>
+                              <div className="absolute bottom-full mb-2 left-1/2 transform -translate-x-1/2 bg-gray-800 text-white text-xs rounded px-2 py-1 opacity-0 group-hover:opacity-100 transition-opacity duration-200 pointer-events-none whitespace-nowrap">
+                                PDF
+                              </div>
                             </div>
+                          </div>
+                        )}
+                      </div>
+                                              <div className="bg-gray-800 p-8 rounded-lg h-[700px] overflow-y-auto shadow-inner">
+                          {originalText ? (
+                            renderClickableText(originalText, false, adaptationResult?.original_word_analysis)
+                          ) : (
+                            <div className="flex items-center justify-center h-full text-gray-400 text-center">
+                              <div>
+                                <div className="text-4xl mb-4">📝</div>
+                                <div className="text-lg font-medium mb-2">Metninizin analiz edilmesi için</div>
+                                <div className="text-sm">yandan link girin</div>
+                              </div>
+                            </div>
+                          )}
+                        </div>
+                    </div>
+                    
+                                        <div className="w-full lg:w-1/2 flex flex-col">
+                      <div className="flex items-center justify-between mb-4">
+                        <h2 className="text-2xl font-bold text-center text-gray-300 flex-1">
+                          🎯 AI Adapted Text
+                        </h2>
+                        {adaptedText && (
+                          <div className="ml-3 flex gap-2">
+                            <div className="relative group">
+                              <button
+                                onClick={() => copyToClipboard(adaptedText, 'adapted')}
+                                className="bg-blue-600 hover:bg-blue-700 text-white p-2 rounded-lg transition-colors duration-200"
+                              >
+                                📋
+                              </button>
+                              <div className="absolute bottom-full mb-2 left-1/2 transform -translate-x-1/2 bg-gray-800 text-white text-xs rounded px-2 py-1 opacity-0 group-hover:opacity-100 transition-opacity duration-200 pointer-events-none whitespace-nowrap">
+                                Copy
+                              </div>
+                            </div>
+                            <div className="relative group">
+                              <button
+                                onClick={() => downloadTextAsPDF(adaptedText, 'adapted')}
+                                className="bg-red-600 hover:bg-red-700 text-white p-2 rounded-lg transition-colors duration-200"
+                              >
+                                📄
+                              </button>
+                            <div className="absolute bottom-full mb-2 left-1/2 transform -translate-x-1/2 bg-gray-800 text-white text-xs rounded px-2 py-1 opacity-0 group-hover:opacity-100 transition-opacity duration-200 pointer-events-none whitespace-nowrap">
+                                PDF
+                              </div>
+                            </div>
+                          </div>
+                        )}
+                      </div>
+                      <div className="bg-gray-800 p-8 rounded-lg h-[700px] overflow-y-auto shadow-inner">
+                        {adaptedText ? (
+                          renderClickableText(adaptedText, true, adaptationResult?.adapted_word_analysis)
+                        ) : (
+                          <div className="flex items-center justify-center h-full text-gray-400 text-center">
                             <div>
-                              <span className="font-bold text-green-400 text-sm">Examples:</span>
-                              <div className="mt-1 space-y-1">
-                                {pattern.examples.map((example, exampleIndex) => (
-                                  <div key={exampleIndex} className="text-gray-300 text-sm italic">
-                                    "{example}"
-                                  </div>
-                                ))}
-                              </div>
+                              <div className="text-4xl mb-4">🎯</div>
+                              <div className="text-lg font-medium mb-2">Metninizin analiz edilmesi için</div>
+                              <div className="text-sm">yandan link girin</div>
                             </div>
                           </div>
-                        ))}
+                        )}
                       </div>
                     </div>
-                  )}
-
-                  {/* Key Grammar Points */}
-                  {grammarAnalysisResult.grammar_analysis.key_grammar_points.length > 0 && (
-                    <div className="mb-6">
-                      <h4 className="text-lg font-bold text-teal-400 mb-3">💡 Key Learning Points</h4>
-                      <div className="grid gap-4">
-                        {grammarAnalysisResult.grammar_analysis.key_grammar_points.map((point, index) => (
-                          <div key={index} className="bg-gray-700 rounded-lg p-4">
-                            <h5 className="font-bold text-purple-400 mb-2">{point.point}</h5>
-                            <p className="text-gray-300 mb-3">{point.description}</p>
-                            <div className="mb-3">
-                              <span className="font-bold text-blue-400 text-sm">Examples:</span>
-                              <div className="mt-1 space-y-1">
-                                {point.examples.map((example, exampleIndex) => (
-                                  <div key={exampleIndex} className="text-gray-300 text-sm italic">
-                                    "{example}"
-                                  </div>
-                                ))}
-                              </div>
-                            </div>
-                            <div className="bg-blue-600 bg-opacity-20 border border-blue-500 rounded p-3">
-                              <span className="font-bold text-blue-400 text-sm">💡 Learning Tip:</span>
-                              <p className="text-gray-300 text-sm mt-1">{point.learning_tip}</p>
-                            </div>
-                          </div>
-                        ))}
-                      </div>
-                    </div>
-                  )}
-
-                  {/* Learning Recommendations */}
-                  {grammarAnalysisResult.grammar_analysis.learning_recommendations.length > 0 && (
-                    <div className="mb-6">
-                      <h4 className="text-lg font-bold text-teal-400 mb-3">🎯 Learning Recommendations</h4>
-                      <div className="bg-gray-700 rounded-lg p-4">
-                        <ul className="list-disc list-inside space-y-2">
-                          {grammarAnalysisResult.grammar_analysis.learning_recommendations.map((recommendation, index) => (
-                            <li key={index} className="text-gray-300">{recommendation}</li>
-                          ))}
-                        </ul>
-                      </div>
-                    </div>
-                  )}
-
-                  {/* Summary */}
-                  {grammarAnalysisResult.grammar_analysis.summary && (
-                    <div className="bg-gray-700 rounded-lg p-4">
-                      <h4 className="text-lg font-bold text-teal-400 mb-2">📋 Summary</h4>
-                      <p className="text-gray-300">{grammarAnalysisResult.grammar_analysis.summary}</p>
-                    </div>
-                  )}
-                </div>
-              </div>
-            )}
-
-            {error && (
-              <div className="bg-red-800 border border-red-600 text-red-200 px-4 py-3 rounded max-w-3xl mx-auto mb-6">
-                ❌ {error}
-              </div>
-            )}
-
-            {/* Adaptation Results */}
-            {adaptationResult && (
-              <div className="mb-6 max-w-4xl mx-auto">
-                <div className="bg-gray-800 rounded-lg p-4">
-                  <h3 className="text-xl font-bold text-teal-400 mb-2">📊 Adaptation Analysis</h3>
-                  <div className="grid grid-cols-2 md:grid-cols-4 gap-4 text-sm">
-                    <div className="bg-gray-700 p-3 rounded">
-                      <div className="font-bold text-red-400">Original</div>
-                      <div>{(adaptationResult.original_analysis?.unknown_percentage || 0).toFixed(1)}% unknown</div>
-                      <div className="text-xs text-gray-400">{adaptationResult.original_analysis.difficulty_level}</div>
-                    </div>
-                    <div className="bg-gray-700 p-3 rounded">
-                      <div className="font-bold text-green-400">Adapted</div>
-                      <div>{(adaptationResult.adapted_analysis?.unknown_percentage || 0).toFixed(1)}% unknown</div>
-                      <div className="text-xs text-gray-400">{adaptationResult.adapted_analysis.difficulty_level}</div>
-                    </div>
-                    <div className="bg-gray-700 p-3 rounded">
-                      <div className="font-bold text-blue-400">Improvement</div>
-                      <div>{(adaptationResult.improvement?.unknown_percentage_change || 0).toFixed(1)}% change</div>
-                      <div className="text-xs text-gray-400">
-                        {adaptationResult.improvement.closer_to_target ? '✅ Better' : '❌ Needs work'}
-                      </div>
-                    </div>
-                    <div className="bg-gray-700 p-3 rounded">
-                      <div className="font-bold text-purple-400">Method</div>
-                      <div className="text-xs">{adaptationResult.adaptation_method}</div>
-                    </div>
-                  </div>
-                </div>
-              </div>
-            )}
-
-            {/* Side-by-Side Text Display */}
-            {originalText && (
-              <div className="flex flex-col lg:flex-row space-y-6 lg:space-y-0 lg:space-x-6">
-                <div className="w-full lg:w-1/2">
-                  <h2 className="text-2xl font-bold mb-4 text-center text-gray-300">
-                    📝 Original Text
-                    {adaptationResult && (
-                      <span className="block text-sm font-normal text-red-400 mt-1">
-                        {(adaptationResult.original_analysis?.unknown_percentage || 0).toFixed(1)}% unknown words
-                      </span>
-                    )}
-                  </h2>
-                  <div className="bg-gray-800 p-6 rounded-lg h-96 overflow-y-auto shadow-inner">
-                    {renderClickableText(originalText, false, adaptationResult?.original_word_analysis)}
-                  </div>
-                </div>
-                
-                <div className="w-full lg:w-1/2">
-                  <h2 className="text-2xl font-bold mb-4 text-center text-gray-300">
-                    🎯 i+1 Adapted Text
-                    {adaptationResult && (
-                      <span className="block text-sm font-normal text-green-400 mt-1">
-                        {(adaptationResult.adapted_analysis?.unknown_percentage || 0).toFixed(1)}% unknown words
-                      </span>
-                    )}
-                  </h2>
-                  <div className="bg-gray-800 p-6 rounded-lg h-96 overflow-y-auto shadow-inner">
-                    {renderClickableText(adaptedText, true, adaptationResult?.adapted_word_analysis)}
                   </div>
                 </div>
               </div>
@@ -1191,13 +1126,14 @@ export default function Home() {
                 </div>
               </div>
             )}
-              </div>
-            )}
-            
-            {/* Text Analysis Tab */}
-            {activeTab === 'analysis' && (
+
+            {/* Smart AI Features Tab */}
+            {activeTab === 'smart' && (
               <div className="bg-gray-900">
-                <TextAnalysis />
+                <SmartFeaturesDemo 
+                  username={currentUser} 
+                  initialText={smartAnalysisText || ""}
+                />
               </div>
             )}
           </>

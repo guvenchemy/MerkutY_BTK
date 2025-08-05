@@ -120,6 +120,61 @@ const TextAnalysis: React.FC = () => {
   const [translationLoading, setTranslationLoading] = useState(false);
   const [userKnownWords, setUserKnownWords] = useState<string[]>([]);
 
+  // ✅ Copy to Clipboard Function
+  const copyToClipboard = async (text: string, type: 'original' | 'adapted') => {
+    try {
+      await navigator.clipboard.writeText(text);
+      console.log(`${type} text copied to clipboard!`);
+      alert(`${type === 'original' ? 'Original' : 'AI Adapted'} text copied to clipboard!`);
+    } catch (err) {
+      console.error('Failed to copy text: ', err);
+      // Fallback for older browsers
+      const textArea = document.createElement('textarea');
+      textArea.value = text;
+      document.body.appendChild(textArea);
+      textArea.select();
+      document.execCommand('copy');
+      document.body.removeChild(textArea);
+      alert(`${type === 'original' ? 'Original' : 'AI Adapted'} text copied to clipboard!`);
+    }
+  };
+
+  // ✅ Download Text as PDF Function  
+  const downloadTextAsPDF = async (text: string, type: 'original' | 'adapted') => {
+    try {
+      const response = await fetch('http://localhost:8000/api/text-analysis/simple-pdf', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({
+          text: text,
+          title: type === 'original' ? 'Original Text' : 'AI Adapted Text',
+          type: type
+        }),
+      });
+
+      if (response.ok) {
+        const blob = await response.blob();
+        const url = window.URL.createObjectURL(blob);
+        const a = document.createElement('a');
+        a.style.display = 'none';
+        a.href = url;
+        a.download = `${type}_text_${new Date().toISOString().split('T')[0]}.pdf`;
+        document.body.appendChild(a);
+        a.click();
+        window.URL.revokeObjectURL(url);
+        document.body.removeChild(a);
+        alert(`${type === 'original' ? 'Original' : 'AI'} text PDF downloaded!`);
+      } else {
+        alert('PDF generation failed. Please try again.');
+      }
+    } catch (error) {
+      console.error('PDF download error:', error);
+      alert('PDF download failed. Please try again.');
+    }
+  };
+
   // Kullanıcının bilinen kelimelerini yükle
   const loadUserKnownWords = React.useCallback(async () => {
     try {
@@ -528,31 +583,15 @@ const TextAnalysis: React.FC = () => {
               );
             }
             
-            // Renk kodlaması bilgi durumuna göre
-            let wordClass = "cursor-pointer px-1 rounded transition-colors duration-200 ";
-            
-            if (isAdapted) {
-              // Adapte metinde: Bilinen kelimeler normal, bilinmeyen pembe
-              if (known) {
-                wordClass += "hover:bg-gray-600 hover:text-white";
-              } else {
-                wordClass += "hover:bg-pink-600 hover:text-white bg-pink-500 bg-opacity-50 text-pink-200 font-bold";
-              }
-            } else {
-              // Orijinal metinde: Bilinen kelimeler normal, bilinmeyen sarı
-              if (known) {
-                wordClass += "hover:bg-gray-600 hover:text-white";
-              } else {
-                wordClass += "hover:bg-yellow-600 hover:text-white bg-yellow-500 bg-opacity-40 text-yellow-200";
-              }
-            }
+            // Simple clickable styling - NO COLOR CODING
+            let wordClass = "cursor-pointer px-1 rounded transition-colors duration-200 hover:bg-gray-600 hover:text-white";
             
             return (
               <span
                 key={index}
                 className={wordClass}
                 onClick={() => translateWord(part)}
-                title={`${known ? 'Bilinen' : 'Bilinmeyen'} kelime - Çeviri için tıklayın`}
+                title="Çeviri ve açıklama için tıklayın"
               >
                 {part}
               </span>
@@ -888,16 +927,40 @@ const TextAnalysis: React.FC = () => {
           {/* Original Text */}
           {analysisResult.original_text && (
             <div className="bg-gray-700 p-4 rounded-lg mb-6">
-              <h3 className="text-xl font-semibold text-teal-400 mb-3">📝 Orijinal Metin</h3>
+              <div className="flex items-center justify-between mb-3">
+                <h3 className="text-xl font-semibold text-teal-400">📝 Orijinal Metin</h3>
+                <div className="flex gap-2">
+                  <div className="relative group">
+                    <button
+                      onClick={() => copyToClipboard(analysisResult.original_text || '', 'original')}
+                      className="bg-blue-600 hover:bg-blue-700 text-white p-2 rounded-lg transition-colors duration-200"
+                    >
+                      📋
+                    </button>
+                    <div className="absolute bottom-full mb-2 left-1/2 transform -translate-x-1/2 bg-gray-800 text-white text-xs rounded px-2 py-1 opacity-0 group-hover:opacity-100 transition-opacity duration-200 pointer-events-none whitespace-nowrap">
+                      Copy
+                    </div>
+                  </div>
+                  <div className="relative group">
+                    <button
+                      onClick={() => downloadTextAsPDF(analysisResult.original_text || '', 'original')}
+                      className="bg-red-600 hover:bg-red-700 text-white p-2 rounded-lg transition-colors duration-200"
+                    >
+                      📄
+                    </button>
+                    <div className="absolute bottom-full mb-2 left-1/2 transform -translate-x-1/2 bg-gray-800 text-white text-xs rounded px-2 py-1 opacity-0 group-hover:opacity-100 transition-opacity duration-200 pointer-events-none whitespace-nowrap">
+                      PDF
+                    </div>
+                  </div>
+                </div>
+              </div>
               <div className="bg-gray-800 p-4 rounded border-l-4 border-teal-500 max-h-64 overflow-y-auto">
                 <div className="text-gray-200 whitespace-pre-wrap leading-relaxed">
                   {renderClickableText(analysisResult.original_text, false)}
                 </div>
               </div>
-              <div className="text-xs text-teal-200 mt-2 space-y-1">
-                <div>💡 <strong>İpucu:</strong> <span className="bg-yellow-500 bg-opacity-40 text-yellow-200 px-1 rounded">Sarı kelimeler</span> bilinmeyen, 
-                <span className="text-blue-300 px-1">mavi kelimeler</span> özel isim, normal kelimeler bilinen kelimeleri gösterir</div>
-                <div>🔤 <strong>Çoklu Seçim:</strong> Birden fazla kelimeyi mouse ile seçip çevirisini görebilirsiniz</div>
+              <div className="text-xs text-teal-200 mt-2">
+                <div>💡 <strong>İpucu:</strong> Herhangi bir kelimeye tıklayarak çevirisini görebilir ve kelime durumunu işaretleyebilirsiniz</div>
               </div>
             </div>
           )}
@@ -905,7 +968,43 @@ const TextAnalysis: React.FC = () => {
           {/* Adapted Text */}
           {analysisResult.adapted_text && (
             <div className="bg-purple-700/30 p-4 rounded-lg border border-purple-500/30 mb-6">
-              <h3 className="text-xl font-semibold text-purple-400 mb-3">🔄 i+1 Seviyesinde Adapte Edilmiş Metin</h3>
+              <div className="flex items-center justify-between mb-3">
+                <h3 className="text-xl font-semibold text-purple-400">🔄 AI Adapted Text</h3>
+                <div className="flex gap-2">
+                  <div className="relative group">
+                    <button
+                      onClick={() => copyToClipboard(
+                        typeof analysisResult.adapted_text === 'object' 
+                          ? analysisResult.adapted_text.adapted_text || ''
+                          : analysisResult.adapted_text || '', 
+                        'adapted'
+                      )}
+                      className="bg-blue-600 hover:bg-blue-700 text-white p-2 rounded-lg transition-colors duration-200"
+                    >
+                      📋
+                    </button>
+                    <div className="absolute bottom-full mb-2 left-1/2 transform -translate-x-1/2 bg-gray-800 text-white text-xs rounded px-2 py-1 opacity-0 group-hover:opacity-100 transition-opacity duration-200 pointer-events-none whitespace-nowrap">
+                      Copy
+                    </div>
+                  </div>
+                  <div className="relative group">
+                    <button
+                      onClick={() => downloadTextAsPDF(
+                        typeof analysisResult.adapted_text === 'object' 
+                          ? analysisResult.adapted_text.adapted_text || ''
+                          : analysisResult.adapted_text || '', 
+                        'adapted'
+                      )}
+                      className="bg-red-600 hover:bg-red-700 text-white p-2 rounded-lg transition-colors duration-200"
+                    >
+                      📄
+                    </button>
+                    <div className="absolute bottom-full mb-2 left-1/2 transform -translate-x-1/2 bg-gray-800 text-white text-xs rounded px-2 py-1 opacity-0 group-hover:opacity-100 transition-opacity duration-200 pointer-events-none whitespace-nowrap">
+                      PDF
+                    </div>
+                  </div>
+                </div>
+              </div>
               <div className="bg-gray-800 p-4 rounded border-l-4 border-purple-500 max-h-64 overflow-y-auto mb-4">
                 <div className="text-gray-200 whitespace-pre-wrap leading-relaxed">
                   {renderClickableText(
