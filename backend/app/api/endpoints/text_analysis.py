@@ -465,3 +465,92 @@ async def get_user_grammar_knowledge(user_id: int, db: Session = Depends(get_db)
         }
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Failed to get user knowledge: {str(e)}")
+
+class SimpleTextPDFRequest(BaseModel):
+    text: str
+    title: str = "Text Document"
+    type: str = "document"
+
+@router.post("/simple-pdf")
+async def generate_simple_text_pdf(request: SimpleTextPDFRequest):
+    """
+    🔄 Simple Text to PDF Generator
+    Creates a PDF from plain text with minimal formatting.
+    """
+    try:
+        from reportlab.lib.pagesizes import letter
+        from reportlab.platypus import SimpleDocTemplate, Paragraph, Spacer
+        from reportlab.lib.styles import getSampleStyleSheet, ParagraphStyle
+        from reportlab.lib.enums import TA_LEFT
+        from io import BytesIO
+        import datetime
+
+        # Create PDF buffer
+        buffer = BytesIO()
+        
+        # Create PDF document
+        doc = SimpleDocTemplate(buffer, pagesize=letter)
+        styles = getSampleStyleSheet()
+        
+        # Custom styles
+        title_style = ParagraphStyle(
+            'CustomTitle',
+            parent=styles['Heading1'],
+            fontSize=16,
+            alignment=TA_LEFT,
+            spaceAfter=20
+        )
+        
+        content_style = ParagraphStyle(
+            'CustomContent',
+            parent=styles['Normal'],
+            fontSize=11,
+            alignment=TA_LEFT,
+            leading=14
+        )
+        
+        # Build PDF content
+        story = []
+        
+        # Add title
+        story.append(Paragraph(request.title, title_style))
+        story.append(Spacer(1, 12))
+        
+        # Add timestamp
+        timestamp = datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+        story.append(Paragraph(f"Generated: {timestamp}", styles['Normal']))
+        story.append(Spacer(1, 20))
+        
+        # Add main content - split by paragraphs
+        paragraphs = request.text.split('\n\n')
+        for paragraph in paragraphs:
+            if paragraph.strip():
+                # Clean paragraph text for reportlab
+                clean_paragraph = paragraph.replace('\n', ' ').strip()
+                story.append(Paragraph(clean_paragraph, content_style))
+                story.append(Spacer(1, 12))
+        
+        # Build PDF
+        doc.build(story)
+        
+        # Get PDF data
+        pdf_data = buffer.getvalue()
+        buffer.close()
+        
+        # Return PDF as response
+        from fastapi.responses import Response
+        return Response(
+            content=pdf_data,
+            media_type="application/pdf",
+            headers={
+                "Content-Disposition": f"attachment; filename={request.type}_text_{datetime.datetime.now().strftime('%Y%m%d')}.pdf"
+            }
+        )
+        
+    except ImportError:
+        raise HTTPException(
+            status_code=500, 
+            detail="PDF generation requires reportlab. Install with: pip install reportlab"
+        )
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"PDF generation failed: {str(e)}")

@@ -1,6 +1,8 @@
 from fastapi import APIRouter, HTTPException, Depends
 from pydantic import BaseModel
 from typing import Dict, List, Optional
+from sqlalchemy.orm import Session
+from app.core.database import get_db
 from app.services.text_adaptation_service import TextAdaptationService
 from app.services.ai_text_adaptation_service import AITextAdaptationService
 from app.services.yt_dlp_service import YTDlpService
@@ -171,7 +173,7 @@ async def get_user_learning_stats(username: str) -> Dict:
 # ============================================================================
 
 @router.post("/adapt")
-async def adapt_text_for_user(request: TextAdaptationRequest) -> Dict:
+async def adapt_text_for_user(request: TextAdaptationRequest, db: Session = Depends(get_db)) -> Dict:
     """
     🤖 AI-Powered text adaptation using OpenAI ChatGPT.
     Intelligently rewrites text to achieve perfect i+1 level.
@@ -181,7 +183,8 @@ async def adapt_text_for_user(request: TextAdaptationRequest) -> Dict:
         result = ai_service.adapt_text_with_ai(
             text=request.text,
             username=request.username,
-            target_unknown_percentage=request.target_unknown_percentage
+            target_unknown_percentage=request.target_unknown_percentage,
+            db=db
         )
         
         if "error" in result:
@@ -195,7 +198,7 @@ async def adapt_text_for_user(request: TextAdaptationRequest) -> Dict:
         raise HTTPException(status_code=500, detail=f"AI text adaptation failed: {str(e)}")
 
 @router.post("/youtube")
-async def ai_adapt_youtube_for_user(request: YouTubeAdaptationRequest) -> Dict:
+async def ai_adapt_youtube_for_user(request: YouTubeAdaptationRequest, db: Session = Depends(get_db)) -> Dict:
     """
     🤖 AI-Powered YouTube adaptation pipeline:
     1. Extract transcript from YouTube
@@ -207,7 +210,8 @@ async def ai_adapt_youtube_for_user(request: YouTubeAdaptationRequest) -> Dict:
         result = ai_service.adapt_youtube_with_ai(
             youtube_url=request.youtube_url,
             username=request.username,
-            target_unknown_percentage=request.target_unknown_percentage
+            target_unknown_percentage=request.target_unknown_percentage,
+            db=db
         )
         
         if "error" in result:
@@ -246,7 +250,7 @@ async def explain_words(request: WordExplanationRequest) -> Dict:
         raise HTTPException(status_code=500, detail=f"AI explanation failed: {str(e)}")
 
 @router.get("/ai-test")
-async def test_openai_connection() -> Dict:
+async def test_openai_connection(db: Session = Depends(get_db)) -> Dict:
     """
     🧪 Test OpenAI API connection and configuration.
     """
@@ -268,7 +272,8 @@ async def test_openai_connection() -> Dict:
         test_result = ai_service.adapt_text_with_ai(
             text="Hello world. This is a simple test.",
             username="ibrahim",
-            target_unknown_percentage=10.0
+            target_unknown_percentage=10.0,
+            db=db
         )
         
         if "error" in test_result:

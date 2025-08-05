@@ -16,6 +16,10 @@ class LibraryResponse(BaseModel):
     data: Optional[Dict] = None
     error: Optional[str] = None
 
+class TranscriptAdaptationRequest(BaseModel):
+    username: str
+    target_unknown_percentage: Optional[float] = 10.0
+
 def get_library_service():
     return TranscriptLibraryService()
 
@@ -88,12 +92,13 @@ async def get_transcript_by_id(
 @router.post("/library/transcript/{transcript_id}/adapt")
 async def adapt_transcript_for_user(
     transcript_id: int,
-    username: str,
+    request: TranscriptAdaptationRequest,
     library_service: TranscriptLibraryService = Depends(get_library_service),
     db: Session = Depends(get_db)
 ):
     """
-    Create AI adaptation for specific user's level.
+    Create smart AI adaptation for specific user's level using their vocabulary and grammar knowledge.
+    Implements i+1 methodology with 90% comprehensible + 10% challenging content.
     """
     try:
         # Get original transcript
@@ -102,11 +107,21 @@ async def adapt_transcript_for_user(
         if not transcript:
             return {"success": False, "error": "Transcript not found"}
         
-        # Create AI adaptation for this user
+        # Create smart AI adaptation for this user
         from app.services.ai_text_adaptation_service import AITextAdaptationService
         ai_service = AITextAdaptationService()
         
-        adaptation_result = ai_service.adapt_text_with_ai(transcript["original_text"], username)
+        # Use the requested unknown percentage for optimal i+1 learning
+        adaptation_result = ai_service.adapt_text_with_ai(
+            text=transcript["original_text"], 
+            username=request.username,
+            db=db,  # Pass the existing db session
+            target_unknown_percentage=request.target_unknown_percentage
+        )
+        
+        if adaptation_result.get("error"):
+            return {"success": False, "error": adaptation_result["error"]}
+        
         adapted_text = adaptation_result.get("adapted_text", transcript["original_text"])
         
         return {
@@ -115,7 +130,73 @@ async def adapt_transcript_for_user(
                 "original_text": transcript["original_text"],
                 "adapted_text": adapted_text,
                 "word_count": transcript["word_count"],
-                "adapted_word_count": len(adapted_text.split())
+                "adapted_word_count": len(adapted_text.split()),
+                "adaptation_info": adaptation_result.get("adaptation_info", {}),
+                "user_level": adaptation_result.get("user_level", "A1"),
+                "adaptation_method": adaptation_result.get("adaptation_method", "Smart AI i+1"),
+                "comprehension_target": "90% known + 10% challenging words"
+            }
+        }
+        
+    except Exception as e:
+        return {"success": False, "error": f"Failed to adapt transcript: {str(e)}"}
+
+@router.post("/library/transcript/video/{video_id}/adapt")
+async def adapt_transcript_by_video_id(
+    video_id: str,
+    request: TranscriptAdaptationRequest,
+    library_service: TranscriptLibraryService = Depends(get_library_service),
+    db: Session = Depends(get_db)
+):
+    """
+    Create smart AI adaptation using video ID instead of transcript ID.
+    More convenient for frontend usage.
+    """
+    try:
+        # Find transcript by video ID
+        from app.models import ProcessedTranscript
+        transcript_record = db.query(ProcessedTranscript).filter(
+            ProcessedTranscript.video_id == video_id,
+            ProcessedTranscript.is_active == True
+        ).first()
+        
+        if not transcript_record:
+            return {"success": False, "error": f"Transcript not found for video ID: {video_id}"}
+        
+        # Get transcript data
+        transcript = {
+            "original_text": transcript_record.original_text,
+            "word_count": transcript_record.word_count
+        }
+        
+        # Create smart AI adaptation for this user
+        from app.services.ai_text_adaptation_service import AITextAdaptationService
+        ai_service = AITextAdaptationService()
+        
+        # Use the requested unknown percentage for optimal i+1 learning
+        adaptation_result = ai_service.adapt_text_with_ai(
+            text=transcript["original_text"], 
+            username=request.username,
+            db=db,
+            target_unknown_percentage=request.target_unknown_percentage
+        )
+        
+        if adaptation_result.get("error"):
+            return {"success": False, "error": adaptation_result["error"]}
+        
+        adapted_text = adaptation_result.get("adapted_text", transcript["original_text"])
+        
+        return {
+            "success": True,
+            "data": {
+                "original_text": transcript["original_text"],
+                "adapted_text": adapted_text,
+                "word_count": transcript["word_count"],
+                "adapted_word_count": len(adapted_text.split()),
+                "adaptation_info": adaptation_result.get("adaptation_info", {}),
+                "user_level": adaptation_result.get("user_level", "A1"),
+                "adaptation_method": adaptation_result.get("adaptation_method", "Smart AI i+1"),
+                "comprehension_target": "90% known + 10% challenging words"
             }
         }
         

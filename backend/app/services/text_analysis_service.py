@@ -16,7 +16,10 @@ except ImportError:
 class TextAnalysisService:
     def __init__(self):
         # Gemini API'yi konfigüre et
-        genai.configure(api_key=os.getenv("GOOGLE_API_KEY"))
+        api_key = os.getenv("GOOGLE_API_KEY") or os.getenv("GEMINI_API_KEY")
+        if not api_key:
+            raise ValueError("GOOGLE_API_KEY or GEMINI_API_KEY environment variable is required")
+        genai.configure(api_key=api_key)
         self.model = genai.GenerativeModel('gemini-2.0-flash')
         
         # spaCy modeli yüklemeye çalış, yoksa basit analiz yap

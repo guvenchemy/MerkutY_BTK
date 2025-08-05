@@ -105,6 +105,22 @@ async def get_current_user_info(
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Failed to get user info: {str(e)}")
 
+@router.get("/user-id/{username}")
+async def get_user_id_by_username(username: str, db: Session = Depends(get_db)):
+    """
+    Get user ID by username for development purposes.
+    """
+    try:
+        user = db.query(User).filter(User.username == username).first()
+        if not user:
+            raise HTTPException(status_code=404, detail="User not found")
+        
+        return {"user_id": user.id, "username": user.username}
+    except HTTPException:
+        raise
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Failed to get user ID: {str(e)}")
+
 @router.post("/logout")
 async def logout():
     """

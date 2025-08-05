@@ -1,30 +1,36 @@
+import os
 from sqlalchemy import create_engine
 from sqlalchemy.ext.declarative import declarative_base
 from sqlalchemy.orm import sessionmaker
-import os
 from dotenv import load_dotenv
-from pathlib import Path
+import logging
 
-# Load environment variables with absolute path
-env_path = Path(__file__).parent.parent.parent / '.env'
-load_dotenv(dotenv_path=env_path)
+# Configure logging
+logging.basicConfig(level=logging.INFO)
+logger = logging.getLogger(__name__)
 
-# Database URL - In production, this should come from environment variables
-DATABASE_URL = os.getenv("DATABASE_URL", "postgresql://postgres:password@localhost/nexus_db")
+load_dotenv()
 
-# Create SQLAlchemy engine
-engine = create_engine(DATABASE_URL)
+DATABASE_URL = os.getenv("DATABASE_URL", "postgresql://postgres:postgres@localhost/nexus_db")
 
-# Create SessionLocal class
+engine = create_engine(
+    DATABASE_URL,
+    pool_size=20,
+    max_overflow=0,
+    pool_recycle=300,
+    echo=False  # Set to True for detailed SQL logging
+)
+
 SessionLocal = sessionmaker(autocommit=False, autoflush=False, bind=engine)
 
-# Create Base class for our models
 Base = declarative_base()
 
 # Dependency to get DB session
 def get_db():
     db = SessionLocal()
+    logger.info(f"DB Pool Status: {engine.pool.status()}")
     try:
         yield db
     finally:
         db.close() 
+        logger.info(f"DB Session closed. Pool Status: {engine.pool.status()}") 

@@ -46,10 +46,8 @@ class TextAdaptationService:
             if not user:
                 return set()
             
-            # Get only words with "known" status
             user_vocab = db.query(UserVocabulary).filter(
-                UserVocabulary.user_id == user.id,
-                UserVocabulary.status == "known"
+                UserVocabulary.user_id == user.id
             ).all()
             
             known_words = set()
@@ -59,18 +57,6 @@ class TextAdaptationService:
                 ).first()
                 if vocab_word:
                     known_words.add(vocab_word.word.lower())
-            
-            # Add only the most basic English words that are commonly missing
-            basic_words = {
-                'the', 'a', 'an', 'and', 'or', 'but', 'in', 'on', 'at', 'to', 'for', 'of', 'with', 'by',
-                'i', 'you', 'he', 'she', 'it', 'we', 'they', 'me', 'him', 'her', 'us', 'them',
-                'is', 'are', 'was', 'were', 'be', 'been', 'being', 'am',
-                'this', 'that', 'these', 'those', 'here', 'there', 'now', 'then',
-                'my', 'your', 'his', 'her', 'its', 'our', 'their',
-                'yes', 'no', 'not', 'very', 'so', 'too', 'also', 'just', 'only', 'even', 'still', 'again'
-            }
-            
-            known_words.update(basic_words)
             
             return known_words
             
@@ -92,7 +78,7 @@ class TextAdaptationService:
             # Get only ignored words
             user_vocab = db.query(UserVocabulary).filter(
                 UserVocabulary.user_id == user.id,
-                UserVocabulary.status == "ignore"
+                UserVocabulary.status == "ignored"
             ).all()
             
             ignored_words = set()
@@ -238,6 +224,68 @@ class TextAdaptationService:
             for known_word in known_words:
                 if known_word.startswith('to ') and known_word[3:] == clean_word:
                     return True
+            
+            # ✅ YENİ: Kelime sonları kontrolü (ed, ing, es, ies)
+            # Eğer kelime bu sonlarla bitiyorsa kök kelimeyi kontrol et
+            word_endings = ['ing', 'ed', 'ies', 'es']
+            for ending in word_endings:
+                if clean_word.endswith(ending) and len(clean_word) > len(ending):
+                    # Kök kelimeyi bul
+                    root_word = clean_word[:-len(ending)]
+                    
+                    # Özel durumlar
+                    if ending == 'ies':
+                        # flies -> fly, tries -> try
+                        root_word = root_word + 'y'
+                    elif ending == 'es':
+                        # Sadece -es için değil, consonant+es durumları için kontrol
+                        # goes -> go, does -> do, watches -> watch gibi
+                        if len(root_word) > 0:
+                            # Eğer kök kelime biliniyor ise
+                            if root_word in known_words:
+                                return True
+                            # "to + kök kelime" formatını da kontrol et
+                            if ('to ' + root_word) in known_words:
+                                return True
+                            # 'e' ekleyerek de dene (watches -> watch)
+                            if (root_word + 'e') in known_words:
+                                return True
+                            # "to + kök kelime + e" formatını da kontrol et
+                            if ('to ' + root_word + 'e') in known_words:
+                                return True
+                    elif ending == 'ed':
+                        # Eğer kök kelime biliniyor ise (worked -> work)
+                        if root_word in known_words:
+                            return True
+                        # "to + kök kelime" formatını da kontrol et
+                        if ('to ' + root_word) in known_words:
+                            return True
+                        # 'e' ekleyerek de dene (used -> use)
+                        if (root_word + 'e') in known_words:
+                            return True
+                        # "to + kök kelime + e" formatını da kontrol et
+                        if ('to ' + root_word + 'e') in known_words:
+                            return True
+                    elif ending == 'ing':
+                        # Eğer kök kelime biliniyor ise (working -> work)
+                        if root_word in known_words:
+                            return True
+                        # "to + kök kelime" formatını da kontrol et
+                        if ('to ' + root_word) in known_words:
+                            return True
+                        # 'e' ekleyerek de dene (using -> use)
+                        if (root_word + 'e') in known_words:
+                            return True
+                        # "to + kök kelime + e" formatını da kontrol et
+                        if ('to ' + root_word + 'e') in known_words:
+                            return True
+                    
+                    # Normal kök kelime kontrolü
+                    if root_word in known_words:
+                        return True
+                    # "to + kök kelime" formatını da kontrol et
+                    if ('to ' + root_word) in known_words:
+                        return True
             
             return False
         
