@@ -162,6 +162,7 @@ async def add_word_to_vocabulary(request: AddWordRequest, db: Session = Depends(
         
         if existing:
             # Update existing word status
+            old_status = existing.status
             existing.status = request.action
             db.commit()
             return {
@@ -169,7 +170,9 @@ async def add_word_to_vocabulary(request: AddWordRequest, db: Session = Depends(
                 "word": request.word,
                 "action": request.action,
                 "user_id": user.id,
-                "updated": True
+                "updated": True,
+                "is_new": False,
+                "old_status": old_status
             }
         
         # Add new word to user vocabulary
@@ -185,7 +188,9 @@ async def add_word_to_vocabulary(request: AddWordRequest, db: Session = Depends(
             "message": f"Word '{request.word}' added to vocabulary with status '{request.action}'",
             "word": request.word,
             "action": request.action,
-            "user_id": user.id
+            "user_id": user.id,
+            "updated": False,
+            "is_new": True
         }
         
     except HTTPException:

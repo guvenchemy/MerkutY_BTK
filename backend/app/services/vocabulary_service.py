@@ -94,10 +94,11 @@ class VocabularyService:
         word: str, 
         translation: str, 
         status: str = "unknown"
-    ) -> bool:
+    ) -> dict:
         """
         Kullanıcıya kelime ve çevirisini ekler
         status: 'known', 'unknown', 'ignored', 'learning'
+        Returns: {"success": bool, "is_new": bool, "action": str}
         """
         try:
             print(f"🔍 VocabularyService: Adding word '{word}' for user {user_id} with status '{status}'")
@@ -107,7 +108,7 @@ class VocabularyService:
             
             if not clean_word:
                 print(f"❌ Clean word is empty")
-                return False
+                return {"success": False, "is_new": False, "action": "failed"}
             
             # Vocabulary tablosuna ekle (yoksa)
             vocab = db.query(Vocabulary).filter(
@@ -115,6 +116,7 @@ class VocabularyService:
                 Vocabulary.language == "en"
             ).first()
             
+            vocab_created = False
             if not vocab:
                 print(f"🔍 Creating new vocabulary entry for '{clean_word}'")
                 vocab = Vocabulary(
@@ -125,6 +127,7 @@ class VocabularyService:
                 db.add(vocab)
                 db.flush()  # ID'yi al
                 print(f"🔍 Created vocabulary with ID: {vocab.id}")
+                vocab_created = True
             else:
                 print(f"🔍 Found existing vocabulary with ID: {vocab.id}")
             
@@ -134,11 +137,16 @@ class VocabularyService:
                 UserVocabulary.vocabulary_id == vocab.id
             ).first()
             
+            is_new_user_vocab = False
+            action = ""
+            
             if user_vocab:
                 print(f"🔍 Updating existing user vocabulary")
                 # Mevcut kayıt varsa güncelle
+                old_status = user_vocab.status
                 user_vocab.status = status
                 user_vocab.translation = translation
+                action = f"updated_from_{old_status}_to_{status}"
             else:
                 print(f"🔍 Creating new user vocabulary")
                 # Yeni kayıt oluştur
@@ -150,10 +158,19 @@ class VocabularyService:
                     learned_at=None  # İlk öğrenme tarihi
                 )
                 db.add(user_vocab)
+                is_new_user_vocab = True
+                action = f"created_with_{status}"
+                
+                db.add(user_vocab)
             
             db.commit()
             print(f"✅ Successfully added vocabulary")
-            return True
+            return {
+                "success": True, 
+                "is_new": is_new_user_vocab, 
+                "action": action,
+                "vocab_created": vocab_created
+            }
             
         except Exception as e:
             db.rollback()
@@ -161,7 +178,7 @@ class VocabularyService:
             print(f"❌ Error type: {type(e)}")
             import traceback
             print(f"❌ Traceback: {traceback.format_exc()}")
-            return False
+            return {"success": False, "is_new": False, "action": "failed"}
     
     @staticmethod
     def get_user_known_words(db: Session, user_id: int) -> List[str]:

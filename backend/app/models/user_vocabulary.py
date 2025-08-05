@@ -19,7 +19,7 @@ class User(Base):
     vocabularies = relationship("UserVocabulary", back_populates="user")
     unknown_words = relationship("UnknownWord", back_populates="user")
     grammar_knowledge = relationship("UserGrammarKnowledge", back_populates="user")
-    added_transcripts = relationship("ProcessedTranscript", foreign_keys="ProcessedTranscript.added_by_user_id")
+    added_transcripts = relationship("TranscriptLibrary", foreign_keys="TranscriptLibrary.added_by_user_id")
 
 class Vocabulary(Base):
     __tablename__ = "vocabularies"

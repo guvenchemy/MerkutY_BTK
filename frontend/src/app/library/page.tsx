@@ -2,38 +2,49 @@
 
 import React, { useState, useEffect } from 'react';
 import { useRouter } from 'next/navigation';
+import WordExplanationPopup from '../../components/smart/WordExplanationPopup';
 
 interface Transcript {
   id: number;
-  video_id: string;
-  video_url: string;
-  video_title: string;
-  channel_name: string;
-  duration: number;
-  language: string;
-  word_count: number;
-  adapted_word_count: number;
-  view_count: number;
-  added_by: string;
+  video_id?: string;
+  video_url?: string;
+  video_title?: string;
+  channel_name?: string;
+  duration?: number;
+  language?: string;
+  word_count?: number;
+  adapted_word_count?: number;
+  view_count?: number;
+  added_by?: string;
   created_at: string;
+  // Web content fields
+  title?: string;
+  url?: string;
+  content_type?: 'youtube' | 'web';
 }
 
 interface TranscriptDetail {
   id: number;
-  video_id: string;
-  video_url: string;
-  video_title: string;
-  channel_name: string;
-  duration: number;
-  original_text: string;
-  adapted_text: string;
-  language: string;
-  word_count: number;
-  adapted_word_count: number;
-  view_count: number;
-  added_by: string;
+  video_id?: string;
+  video_url?: string;
+  video_title?: string;
+  channel_name?: string;
+  duration?: number;
+  original_text?: string;
+  adapted_text?: string;
+  language?: string;
+  word_count?: number;
+  adapted_word_count?: number;
+  view_count?: number;
+  added_by?: string;
   created_at: string;
+  // Web content fields
+  title?: string;
+  url?: string;
+  content?: string;
+  content_type?: 'youtube' | 'web';
 }
+
 
 export default function LibraryPage() {
   const router = useRouter();
@@ -49,6 +60,17 @@ export default function LibraryPage() {
   const [adaptedText, setAdaptedText] = useState<string>('');
   const [isAdapting, setIsAdapting] = useState(false);
   const [adaptedWordCount, setAdaptedWordCount] = useState<number>(0);
+  
+  // Word popup state
+  const [wordPopup, setWordPopup] = useState<{
+    word: string;
+    isOpen: boolean;
+    position: { x: number; y: number };
+  }>({
+    word: '',
+    isOpen: false,
+    position: { x: 0, y: 0 }
+  });
 
   useEffect(() => {
     // Check authentication
@@ -85,23 +107,68 @@ export default function LibraryPage() {
 
   const fetchTranscripts = async () => {
     try {
+      console.log('🔄 Starting to fetch content...');
       setLoading(true);
       const token = localStorage.getItem('token');
-      const response = await fetch('http://localhost:8000/api/library/transcripts', {
+      console.log('🔑 Token:', token ? 'exists' : 'missing');
+      
+      // Fetch YouTube transcripts
+      const transcriptResponse = await fetch('http://localhost:8000/api/library/transcripts', {
         headers: {
           'Authorization': `Bearer ${token}`,
           'Content-Type': 'application/json',
         },
       });
 
-      if (response.ok) {
-        const data = await response.json();
-        setTranscripts(data.data || []);
+      // Fetch web content
+      const webContentResponse = await fetch('http://localhost:8000/api/web-content', {
+        headers: {
+          'Authorization': `Bearer ${token}`,
+          'Content-Type': 'application/json',
+        },
+      });
+
+      let allContent: any[] = [];
+
+      if (transcriptResponse.ok) {
+        const transcriptData = await transcriptResponse.json();
+        console.log('📺 YouTube transcripts response:', transcriptData);
+        const transcripts = transcriptData.data || [];
+        // Add content type marker
+        transcripts.forEach((transcript: any) => {
+          transcript.content_type = 'youtube';
+        });
+        allContent = [...allContent, ...transcripts];
+        console.log('📚 Total content after YouTube:', allContent.length);
       } else {
-        console.error('Failed to fetch transcripts');
+        console.error('❌ YouTube transcripts fetch failed:', transcriptResponse.status);
       }
+
+      if (webContentResponse.ok) {
+        const webData = await webContentResponse.json();
+        console.log('🌐 Web content response:', webData);
+        const webContents = webData.data || [];
+        // Add content type marker
+        webContents.forEach((content: any) => {
+          content.content_type = 'web';
+        });
+        allContent = [...allContent, ...webContents];
+        console.log('📚 Total content after web:', allContent.length);
+      } else {
+        console.error('❌ Web content fetch failed:', webContentResponse.status);
+      }
+
+      // Sort by created_at descending
+      allContent.sort((a: any, b: any) => {
+        const dateA = new Date(a.created_at || 0);
+        const dateB = new Date(b.created_at || 0);
+        return dateB.getTime() - dateA.getTime();
+      });
+
+      setTranscripts(allContent);
+      
     } catch (error) {
-      console.error('Error fetching transcripts:', error);
+      console.error('Error fetching content:', error);
     } finally {
       setLoading(false);
     }
@@ -143,10 +210,14 @@ export default function LibraryPage() {
     }
   };
 
-  const fetchTranscriptDetail = async (transcriptId: number) => {
+  const fetchTranscriptDetail = async (transcriptId: number, contentType: string = 'youtube') => {
     try {
       const token = localStorage.getItem('token');
-      const response = await fetch(`http://localhost:8000/api/library/transcript/${transcriptId}`, {
+      const endpoint = contentType === 'web' 
+        ? `http://localhost:8000/api/web-content/${transcriptId}`
+        : `http://localhost:8000/api/library/transcript/${transcriptId}`;
+        
+      const response = await fetch(endpoint, {
         headers: {
           'Authorization': `Bearer ${token}`,
           'Content-Type': 'application/json',
@@ -246,6 +317,45 @@ export default function LibraryPage() {
     router.push('/login');
   };
 
+  // Handle word click for explanation popup
+  const handleWordClick = (word: string, event: React.MouseEvent) => {
+    const rect = event.currentTarget.getBoundingClientRect();
+    setWordPopup({
+      word: word.toLowerCase().replace(/[^\w]/g, ''), // Clean the word
+      isOpen: true,
+      position: {
+        x: rect.left + window.scrollX,
+        y: rect.bottom + window.scrollY + 5
+      }
+    });
+  };
+
+  // Make text clickable for word explanations
+  const renderClickableText = (text: string) => {
+    // Type check - eğer text string değilse boş string kullan
+    const safeText = typeof text === 'string' ? text : '';
+    
+    if (!safeText || safeText.trim() === '') {
+      return <div className="text-gray-500 italic">No text available</div>;
+    }
+    
+    return safeText.split(/(\s+)/).map((part, index) => {
+      const isWord = /\w+/.test(part);
+      if (isWord) {
+        return (
+          <span
+            key={index}
+            className="cursor-pointer hover:bg-blue-100 hover:underline px-1 rounded transition-colors"
+            onClick={(e) => handleWordClick(part, e)}
+          >
+            {part}
+          </span>
+        );
+      }
+      return part;
+    });
+  };
+
   // ✅ Copy to Clipboard Function
   const copyToClipboard = async (text: string, type: 'original' | 'adapted') => {
     try {
@@ -305,8 +415,8 @@ export default function LibraryPage() {
   
   // Apply filters to transcripts
   const filteredTranscripts = displayTranscripts.filter(transcript => {
-    if (filterMinWords > 0 && transcript.word_count < filterMinWords) return false;
-    if (filterMaxWords > 0 && transcript.word_count > filterMaxWords) return false;
+    if (filterMinWords > 0 && (transcript.word_count || 0) < filterMinWords) return false;
+    if (filterMaxWords > 0 && (transcript.word_count || 0) > filterMaxWords) return false;
     return true;
   });
 
@@ -466,8 +576,8 @@ export default function LibraryPage() {
                   <div className="p-4 space-y-3">
                     {filteredTranscripts.map((transcript) => (
                       <div
-                        key={transcript.id}
-                        onClick={() => fetchTranscriptDetail(transcript.id)}
+                        key={`${transcript.content_type || 'youtube'}-${transcript.id}`}
+                        onClick={() => fetchTranscriptDetail(transcript.id, transcript.content_type)}
                         className={`p-4 rounded-lg border-2 cursor-pointer transition-all duration-200 hover:shadow-md bg-white ${
                           selectedTranscript?.id === transcript.id 
                             ? 'border-blue-500 bg-blue-50 shadow-md' 
@@ -476,16 +586,26 @@ export default function LibraryPage() {
                       >
                         <div className="flex items-start justify-between">
                           <div className="flex-1">
-                            <h3 className="font-medium text-gray-900 line-clamp-2 text-sm">
-                              {transcript.video_title}
-                            </h3>
+                            <div className="flex items-center gap-2 mb-1">
+                              <h3 className="font-medium text-gray-900 line-clamp-2 text-sm">
+                                {transcript.video_title || transcript.title}
+                              </h3>
+                              {/* Content type indicator */}
+                              <span className={`px-2 py-1 rounded-full text-xs font-medium ${
+                                transcript.content_type === 'youtube' 
+                                  ? 'bg-red-100 text-red-800' 
+                                  : 'bg-blue-100 text-blue-800'
+                              }`}>
+                                {transcript.content_type === 'youtube' ? 'YT' : 'Web'}
+                              </span>
+                            </div>
                             <p className="text-xs text-gray-600 mt-1">
-                              {transcript.channel_name}
+                              {transcript.channel_name || transcript.url}
                             </p>
                           </div>
                           <div className="ml-2 flex flex-col items-end">
                             <span className="text-xs bg-blue-100 text-blue-800 px-2 py-1 rounded-full">
-                              {formatDuration(transcript.duration)}
+                              {transcript.duration ? formatDuration(transcript.duration) : 'Web Article'}
                             </span>
                           </div>
                         </div>
@@ -493,14 +613,14 @@ export default function LibraryPage() {
                         <div className="flex items-center justify-between mt-3 text-xs">
                           <div className="flex items-center space-x-2">
                             <span className="bg-green-100 text-green-800 px-2 py-1 rounded-full">
-                              📝 {transcript.word_count}
+                              📝 {transcript.word_count || 0}
                             </span>
                             <span className="bg-purple-100 text-purple-800 px-2 py-1 rounded-full">
-                              👁️ {transcript.view_count}
+                              👁️ {transcript.view_count || 0}
                             </span>
                           </div>
                           <span className="text-gray-400 text-xs">
-                            {transcript.added_by}
+                            {transcript.added_by || 'Unknown'}
                           </span>
                         </div>
                         
@@ -521,14 +641,15 @@ export default function LibraryPage() {
               <div className="bg-white rounded-lg shadow-sm border">
                 <div className="p-6 border-b">
                   <h2 className="text-xl font-semibold text-gray-900">
-                    {selectedTranscript.video_title}
+                    {selectedTranscript.video_title || selectedTranscript.title}
                   </h2>
                   <p className="text-sm text-gray-600 mt-1">
-                    {selectedTranscript.channel_name} • {formatDuration(selectedTranscript.duration)}
+                    {selectedTranscript.channel_name || selectedTranscript.url} 
+                    {selectedTranscript.duration && ` • ${formatDuration(selectedTranscript.duration)}`}
                   </p>
                   <div className="flex items-center space-x-4 mt-2 text-sm text-gray-500">
-                    <span>👁️ {selectedTranscript.view_count} görüntülenme</span>
-                    <span>📝 {selectedTranscript.word_count} kelime</span>
+                    {selectedTranscript.view_count && <span>👁️ {selectedTranscript.view_count} görüntülenme</span>}
+                    <span>📝 {selectedTranscript.word_count || 0} kelime</span>
                     <span>🤖 {adaptedWordCount || selectedTranscript.adapted_word_count || 0} kelime (AI)</span>
                   </div>
                 </div>
@@ -540,7 +661,7 @@ export default function LibraryPage() {
                       <div className="flex gap-2">
                         <div className="relative group">
                           <button
-                            onClick={() => copyToClipboard(selectedTranscript.original_text, 'original')}
+                            onClick={() => copyToClipboard(selectedTranscript.original_text || selectedTranscript.content || '', 'original')}
                             className="bg-blue-600 hover:bg-blue-700 text-white p-2 rounded-lg transition-colors duration-200 text-sm"
                           >
                             📋
@@ -551,7 +672,7 @@ export default function LibraryPage() {
                         </div>
                         <div className="relative group">
                           <button
-                            onClick={() => downloadTextAsPDF(selectedTranscript.original_text, 'original')}
+                            onClick={() => downloadTextAsPDF(selectedTranscript.original_text || selectedTranscript.content || '', 'original')}
                             className="bg-red-600 hover:bg-red-700 text-white p-2 rounded-lg transition-colors duration-200 text-sm"
                           >
                             📄
@@ -563,9 +684,9 @@ export default function LibraryPage() {
                       </div>
                     </div>
                     <div className="bg-gray-50 rounded-lg p-4 max-h-96 overflow-y-auto">
-                      <p className="text-sm text-gray-700 whitespace-pre-wrap">
-                        {selectedTranscript.original_text}
-                      </p>
+                      <div className="text-sm text-gray-700 whitespace-pre-wrap">
+                        {renderClickableText(selectedTranscript.original_text || selectedTranscript.content || '')}
+                      </div>
                     </div>
                   </div>
 
@@ -578,7 +699,7 @@ export default function LibraryPage() {
                           <div className="flex gap-2">
                             <div className="relative group">
                               <button
-                                onClick={() => copyToClipboard(adaptedText || selectedTranscript.adapted_text, 'adapted')}
+                                onClick={() => copyToClipboard(adaptedText || selectedTranscript.adapted_text || '', 'adapted')}
                                 className="bg-blue-600 hover:bg-blue-700 text-white p-2 rounded-lg transition-colors duration-200 text-sm"
                               >
                                 📋
@@ -589,7 +710,7 @@ export default function LibraryPage() {
                             </div>
                             <div className="relative group">
                               <button
-                                onClick={() => downloadTextAsPDF(adaptedText || selectedTranscript.adapted_text, 'adapted')}
+                                onClick={() => downloadTextAsPDF(adaptedText || selectedTranscript.adapted_text || '', 'adapted')}
                                 className="bg-red-600 hover:bg-red-700 text-white p-2 rounded-lg transition-colors duration-200 text-sm"
                               >
                                 📄
@@ -610,9 +731,12 @@ export default function LibraryPage() {
                       </div>
                     </div>
                     <div className="bg-blue-50 rounded-lg p-4 max-h-96 overflow-y-auto">
-                      <p className="text-sm text-gray-700 whitespace-pre-wrap">
-                        {adaptedText || selectedTranscript.adapted_text || 'AI adaptasyonu henüz yapılmamış. "Seviyeme Göre Adapt Et" butonuna tıklayın.'}
-                      </p>
+                      <div className="text-sm text-gray-700 whitespace-pre-wrap">
+                        {adaptedText || selectedTranscript.adapted_text ? 
+                          renderClickableText(adaptedText || selectedTranscript.adapted_text || '') :
+                          'AI adaptasyonu henüz yapılmamış. "Seviyeme Göre Adapt Et" butonuna tıklayın.'
+                        }
+                      </div>
                     </div>
                   </div>
                 </div>
@@ -631,6 +755,15 @@ export default function LibraryPage() {
           </div>
         </div>
       </div>
+      
+      {/* Word Explanation Popup */}
+      <WordExplanationPopup
+        word={wordPopup.word}
+        isOpen={wordPopup.isOpen}
+        onClose={() => setWordPopup(prev => ({ ...prev, isOpen: false }))}
+        position={wordPopup.position}
+        currentUser={user?.username}
+      />
     </div>
   );
 }

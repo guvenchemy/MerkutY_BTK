@@ -56,7 +56,7 @@ class AITeacherService:
             
             # 3. Generate explanations for unknown patterns
             explanations = []
-            for pattern in unknown_patterns[:3]:  # Max 3 explanations per session
+            for pattern in unknown_patterns:  # Show ALL unknown patterns, not just first 3
                 explanation = await self._generate_grammar_explanation(
                     text, pattern, user_id, db
                 )

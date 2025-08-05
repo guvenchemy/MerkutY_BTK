@@ -99,8 +99,13 @@ async def get_user_learning_stats(username: str) -> Dict:
                 detail=f"User '{username}' not found"
             )
         
-        # Get detailed vocabulary stats
-        known_words = TextAdaptationService.get_user_known_words(username, db)
+        # Get detailed vocabulary stats - Use user_id instead of username
+        # Get known words using user_id directly from database
+        user_known_words = db.query(Vocabulary.word).join(UserVocabulary).filter(
+            UserVocabulary.user_id == user.id,
+            UserVocabulary.status == "known"
+        ).all()
+        known_words = [row[0] for row in user_known_words]
         
         # Count words by status
         known_count = db.query(UserVocabulary).filter(
@@ -179,6 +184,12 @@ async def adapt_text_for_user(request: TextAdaptationRequest, db: Session = Depe
     Intelligently rewrites text to achieve perfect i+1 level.
     """
     try:
+        print(f"[DEBUG] Adaptation request received:")
+        print(f"  - username: {request.username}")
+        print(f"  - target_unknown_percentage: {request.target_unknown_percentage}")
+        print(f"  - text length: {len(request.text)} characters")
+        print(f"  - text preview: {request.text[:100]}...")
+        
         ai_service = AITextAdaptationService()
         result = ai_service.adapt_text_with_ai(
             text=request.text,
@@ -186,6 +197,9 @@ async def adapt_text_for_user(request: TextAdaptationRequest, db: Session = Depe
             target_unknown_percentage=request.target_unknown_percentage,
             db=db
         )
+        
+        print(f"[DEBUG] Adaptation result keys: {list(result.keys())}")
+        print(f"[DEBUG] Success field: {result.get('success', 'NO SUCCESS FIELD')}")
         
         if "error" in result:
             raise HTTPException(status_code=500, detail=result["error"])

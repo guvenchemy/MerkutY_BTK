@@ -1,4 +1,5 @@
 import React, { useState, useEffect } from 'react';
+import WordExplanationPopup from './smart/WordExplanationPopup';
 
 const levels = ['A1', 'A2', 'B1', 'B2', 'C1', 'C2'];
 
@@ -19,6 +20,7 @@ interface Transcript {
   created_at?: string;
   level?: string; // AI tarafından analiz edilecek
   category?: string; // AI tarafından belirlenecek
+  content_type?: 'youtube' | 'web'; // İçerik türü
 }
 
 // AI ile text level analizi yapan fonksiyon
@@ -57,25 +59,61 @@ const analyzeTextLevel = async (text: string): Promise<{ level: string; category
 };
 
 // Gerçek AI adaptation fonksiyonu
-const adaptTextWithAI = async (transcriptId: number, username: string): Promise<string> => {
+const adaptTextWithAI = async (transcriptId: number, username: string, contentType: string = 'youtube'): Promise<string> => {
   try {
-    const response = await fetch(`http://localhost:8000/api/library/transcript/${transcriptId}/adapt`, {
+    let endpoint, body;
+    
+    if (contentType === 'web') {
+      // Web content için direkt text adaptation kullan
+      endpoint = 'http://localhost:8000/api/adaptation/adapt';
+      
+      // Önce web content'in metnini al
+      const contentResponse = await fetch(`http://localhost:8000/api/web-content/${transcriptId}`);
+      if (!contentResponse.ok) throw new Error('Web content bulunamadı');
+      
+      const contentData = await contentResponse.json();
+      if (!contentData.success) throw new Error('Web content alınamadı');
+      
+      body = JSON.stringify({
+        text: contentData.data.content,
+        username: username,
+        target_unknown_percentage: 10.0
+      });
+    } else {
+      // YouTube transcript için eski method
+      endpoint = `http://localhost:8000/api/library/transcript/${transcriptId}/adapt`;
+      body = JSON.stringify({
+        username: username,
+        target_unknown_percentage: 10.0
+      });
+    }
+    
+    const response = await fetch(endpoint, {
       method: 'POST',
       headers: {
         'Content-Type': 'application/json',
       },
-      body: JSON.stringify({
-        username: username,
-        target_unknown_percentage: 10.0
-      }),
+      body: body,
     });
 
     if (response.ok) {
       const data = await response.json();
-      if (data.success && data.data) {
-        return data.data.adapted_text;
+      console.log('[DEBUG] Adaptation response:', data);
+      
+      if (contentType === 'web') {
+        // Web content için direkt response yapısı
+        if (data.success && data.adapted_text) {
+          return data.adapted_text;
+        } else {
+          throw new Error(data.error || 'Web content adaptation failed');
+        }
       } else {
-        throw new Error(data.error || 'Adaptation failed');
+        // YouTube content için wrapped response yapısı
+        if (data.success && data.data) {
+          return data.data.adapted_text || data.data.text;
+        } else {
+          throw new Error(data.error || 'YouTube adaptation failed');
+        }
       }
     } else {
       throw new Error('Network error during adaptation');
@@ -102,6 +140,55 @@ const Library = ({ currentUser, userLevel }: LibraryProps) => {
   const [page, setPage] = useState(1);
   const [loading, setLoading] = useState(true);
   const [adaptationLoading, setAdaptationLoading] = useState(false);
+  
+  // Word explanation popup state
+  const [wordPopup, setWordPopup] = useState<{
+    word: string;
+    isOpen: boolean;
+    position: { x: number; y: number };
+  }>({
+    word: '',
+    isOpen: false,
+    position: { x: 0, y: 0 }
+  });
+
+  // Handle word click for explanation
+  const handleWordClick = (word: string, event: React.MouseEvent) => {
+    const rect = event.currentTarget.getBoundingClientRect();
+    setWordPopup({
+      word: word.toLowerCase().replace(/[^\w]/g, ''), // Clean the word
+      isOpen: true,
+      position: {
+        x: rect.left + window.scrollX,
+        y: rect.bottom + window.scrollY + 5
+      }
+    });
+  };
+
+  // Close word popup
+  const closeWordPopup = () => {
+    setWordPopup(prev => ({ ...prev, isOpen: false }));
+  };
+
+  // Make text clickable for word explanations
+  const renderClickableText = (text: string) => {
+    return text.split(/(\s+)/).map((part, index) => {
+      const isWord = /\w+/.test(part);
+      if (isWord) {
+        return (
+          <span
+            key={index}
+            className="cursor-pointer hover:bg-blue-100 hover:underline px-1 rounded transition-colors"
+            onClick={(e) => handleWordClick(part, e)}
+            title="Kelime açıklaması için tıklayın"
+          >
+            {part}
+          </span>
+        );
+      }
+      return <span key={index}>{part}</span>;
+    });
+  };
 
   // Database'den transcript'leri çek
   useEffect(() => {
@@ -111,14 +198,22 @@ const Library = ({ currentUser, userLevel }: LibraryProps) => {
   const fetchTranscripts = async () => {
     try {
       setLoading(true);
-      const response = await fetch('http://localhost:8000/api/library/transcripts?limit=50&offset=0');
       
-      if (response.ok) {
-        const data = await response.json();
-        if (data.success && data.data) {
+      // YouTube transcripts'leri getir
+      const transcriptResponse = await fetch('http://localhost:8000/api/library/transcripts?limit=50&offset=0');
+      
+      // Web content'leri getir
+      const webContentResponse = await fetch('http://localhost:8000/api/web-content?limit=50&offset=0');
+      
+      let allTranscripts: any[] = [];
+      
+      // YouTube transcripts'leri işle
+      if (transcriptResponse.ok) {
+        const transcriptData = await transcriptResponse.json();
+        if (transcriptData.success && transcriptData.data) {
           // Her transcript için AI level analizi yap
           const transcriptsWithLevels = await Promise.all(
-            data.data.map(async (transcript: any) => {
+            transcriptData.data.map(async (transcript: any) => {
               let level = 'A1';
               let category = 'General';
               
@@ -144,18 +239,56 @@ const Library = ({ currentUser, userLevel }: LibraryProps) => {
                 added_by: transcript.added_by || 'Unknown',
                 created_at: transcript.created_at,
                 level: level,
-                category: category
+                category: category,
+                content_type: 'youtube'
               };
             })
           );
-          
-          setTranscripts(transcriptsWithLevels);
-        } else {
-          console.error('Failed to fetch transcripts:', data.error);
+          allTranscripts = [...allTranscripts, ...transcriptsWithLevels];
         }
-      } else {
-        console.error('Network error fetching transcripts');
       }
+      
+      // Web content'leri işle
+      if (webContentResponse.ok) {
+        const webData = await webContentResponse.json();
+        if (webData.success && webData.data) {
+          const webContentsWithLevels = await Promise.all(
+            webData.data.map(async (content: any) => {
+              let level = 'A1';
+              let category = 'Web Article';
+              
+              return {
+                id: content.id,
+                video_id: null,
+                video_title: content.title || 'Web Article',
+                channel_name: content.url || 'Web Source',
+                duration: null,
+                original_text: null, // Detayda alınacak
+                adapted_text: null,
+                language: 'en',
+                word_count: content.word_count || 0,
+                adapted_word_count: 0,
+                view_count: 0,
+                added_by: 'User',
+                created_at: content.created_at,
+                level: level,
+                category: category,
+                content_type: 'web'
+              };
+            })
+          );
+          allTranscripts = [...allTranscripts, ...webContentsWithLevels];
+        }
+      }
+      
+      // Tarihe göre sırala
+      allTranscripts.sort((a, b) => {
+        const dateA = new Date(a.created_at || 0);
+        const dateB = new Date(b.created_at || 0);
+        return dateB.getTime() - dateA.getTime();
+      });
+      
+      setTranscripts(allTranscripts);
     } catch (error) {
       console.error('Error fetching transcripts:', error);
     } finally {
@@ -188,16 +321,25 @@ const Library = ({ currentUser, userLevel }: LibraryProps) => {
     // Eğer transcript'te full content yoksa API'den çek
     if (!transcript.original_text && transcript.id) {
       try {
-        const response = await fetch(`http://localhost:8000/api/library/transcript/${transcript.id}`);
+        let response;
+        
+        // Content türüne göre farklı endpoint kullan
+        if (transcript.content_type === 'web') {
+          response = await fetch(`http://localhost:8000/api/web-content/${transcript.id}`);
+        } else {
+          response = await fetch(`http://localhost:8000/api/library/transcript/${transcript.id}`);
+        }
+        
         if (response.ok) {
           const data = await response.json();
           if (data.success && data.data) {
-            const fullTranscript = { ...transcript, original_text: data.data.original_text };
+            const contentField = transcript.content_type === 'web' ? data.data.content : data.data.original_text;
+            const fullTranscript = { ...transcript, original_text: contentField };
             setSelectedTranscript(fullTranscript);
           }
         }
       } catch (error) {
-        console.error('Error fetching full transcript:', error);
+        console.error('Error fetching full content:', error);
       }
     }
   };
@@ -208,7 +350,11 @@ const Library = ({ currentUser, userLevel }: LibraryProps) => {
     
     try {
       setAdaptationLoading(true);
-      const adaptedResult = await adaptTextWithAI(selectedTranscript.id, currentUser);
+      const adaptedResult = await adaptTextWithAI(
+        selectedTranscript.id, 
+        currentUser,
+        selectedTranscript.content_type || 'youtube'
+      );
       setAdaptedText(adaptedResult);
     } catch (error) {
       console.error('Adaptation failed:', error);
@@ -326,9 +472,9 @@ const Library = ({ currentUser, userLevel }: LibraryProps) => {
           ) : (
             paginatedTranscripts.map((t: Transcript) => (
               <div
-                key={t.id}
+                key={`${t.content_type || 'youtube'}-${t.id}`}
                 className={`mb-4 rounded-lg shadow-lg p-4 cursor-pointer border-2 transition-all duration-200 ${
-                  selectedTranscript && selectedTranscript.id === t.id 
+                  selectedTranscript && selectedTranscript.id === t.id && selectedTranscript.content_type === t.content_type
                     ? 'border-teal-400 bg-teal-900 bg-opacity-30' 
                     : 'border-gray-600 bg-gray-700 hover:border-gray-500 hover:bg-gray-600'
                 }`}
@@ -419,7 +565,9 @@ const Library = ({ currentUser, userLevel }: LibraryProps) => {
           </div>
           <div className="flex-1 text-gray-200 whitespace-pre-line overflow-y-auto bg-gray-700 rounded-lg p-4">
             {selectedTranscript && selectedTranscript.original_text ? (
-              selectedTranscript.original_text
+              <div className="leading-relaxed">
+                {renderClickableText(selectedTranscript.original_text)}
+              </div>
             ) : (
               <div className="flex items-center justify-center h-full">
                 <span className="text-gray-400 text-center">
@@ -469,7 +617,9 @@ const Library = ({ currentUser, userLevel }: LibraryProps) => {
                 </div>
               </div>
             ) : adaptedText ? (
-              adaptedText
+              <div className="leading-relaxed">
+                {renderClickableText(adaptedText)}
+              </div>
             ) : (
               <div className="flex items-center justify-center h-full">
                 <span className="text-gray-400 text-center">
@@ -483,6 +633,15 @@ const Library = ({ currentUser, userLevel }: LibraryProps) => {
           </div>
         </div>
       </div>
+
+      {/* Word Explanation Popup */}
+      <WordExplanationPopup
+        word={wordPopup.word}
+        isOpen={wordPopup.isOpen}
+        onClose={closeWordPopup}
+        position={wordPopup.position}
+        currentUser={currentUser}
+      />
     </div>
   );
 };

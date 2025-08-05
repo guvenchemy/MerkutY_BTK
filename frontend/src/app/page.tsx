@@ -5,6 +5,7 @@ import { useRouter } from 'next/navigation';
 import VocabularyUpload from '../components/VocabularyUpload';
 import { SmartFeaturesDemo } from '../components/smart';
 import Library from '../components/Library';
+import WordExplanationPopup from '../components/smart/WordExplanationPopup';
 
 // Types for our API responses
 interface UserStats {
@@ -124,9 +125,18 @@ export default function Home() {
   // Interactive Features State
   const [selectedText, setSelectedText] = useState<string | null>(null);
   const [selectedWord, setSelectedWord] = useState<string | null>(null);
-  const [wordExplanation, setWordExplanation] = useState<WordExplanation | null>(null);
-  const [showExplanationModal, setShowExplanationModal] = useState(false);
-  const [isLoadingExplanation, setIsLoadingExplanation] = useState(false);
+  
+  // Modern Word Popup State (replacing old explanation modal)
+  const [wordPopup, setWordPopup] = useState<{
+    word: string;
+    isOpen: boolean;
+    position: { x: number; y: number };
+  }>({
+    word: '',
+    isOpen: false,
+    position: { x: 0, y: 0 }
+  });
+  
   const [isAddingWord, setIsAddingWord] = useState(false);
   
   // Settings State - Removed target percentage (not needed)
@@ -261,7 +271,9 @@ export default function Home() {
   const loadUserStats = async () => {
     try {
       const token = localStorage.getItem('token');
-      const response = await fetch(`http://localhost:8000/api/adaptation/user-stats/${currentUser}`, {
+      const url = `http://localhost:8000/api/adaptation/user-stats/${currentUser}`;
+      
+      const response = await fetch(url, {
         headers: {
           'Authorization': `Bearer ${token}`,
           'Content-Type': 'application/json',
@@ -273,10 +285,29 @@ export default function Home() {
       } else if (response.status === 401) {
         // Unauthorized, redirect to login
         handleLogout();
+      } else {
+        console.log('Failed to load user stats, status:', response.status);
       }
     } catch (err) {
       console.error('Failed to load user stats:', err);
     }
+  };
+
+  // URL tipini otomatik algıla
+  const detectUrlType = (url: string): 'youtube' | 'medium' | 'wikipedia' | 'unsupported' => {
+    if (!url) return 'unsupported';
+    
+    const cleanUrl = url.toLowerCase().trim();
+    
+    if (cleanUrl.includes('youtube.com') || cleanUrl.includes('youtu.be')) {
+      return 'youtube';
+    } else if (cleanUrl.includes('medium.com')) {
+      return 'medium';
+    } else if (cleanUrl.includes('wikipedia.org')) {
+      return 'wikipedia';
+    }
+    
+    return 'unsupported';
   };
 
   const handleYouTubeSubmit = async (e: React.FormEvent) => {
@@ -288,15 +319,194 @@ export default function Home() {
     setAdaptationResult(null);
 
     if (!url) {
-      setError('Please enter a YouTube URL.');
+      setError('Please enter a URL.');
       setIsLoading(false);
       return;
     }
 
+    // URL tipini algıla
+    const urlType = detectUrlType(url);
+    
+    if (urlType === 'unsupported') {
+      setError('Sadece YouTube, Medium ve Wikipedia linkleri desteklenmektedir.');
+      setIsLoading(false);
+      return;
+    }
+
+    // Medium ve Wikipedia için caching sistemli backend'e gönder
+    if (urlType === 'medium' || urlType === 'wikipedia') {
+      try {
+        // Önce web content'i cache'den al veya çek
+        const contentResponse = await fetch('http://localhost:8000/api/web-content-from-url', {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+          },
+          body: JSON.stringify({
+            url: url
+          }),
+        });
+
+        if (!contentResponse.ok) {
+          const errorData = await contentResponse.json();
+          throw new Error(errorData.error || `Failed to fetch ${urlType} content.`);
+        }
+
+        const contentData = await contentResponse.json();
+        
+        if (!contentData.success) {
+          throw new Error(contentData.error || `Failed to get ${urlType} content.`);
+        }
+
+        // Cache'den gelip gelmediğini göster
+        const cacheMessage = contentData.data.from_cache 
+          ? `✅ Content loaded from cache` 
+          : `🌐 Content fetched and cached`;
+        console.log(cacheMessage);
+
+        // Şimdi analiz için backend'e gönder (cached content ile)
+        const response = await fetch('http://localhost:8000/api/text-analysis/analyze-web', {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+          },
+          body: JSON.stringify({
+            web_url: url,
+            include_examples: false,
+            include_adaptation: true,
+            user_id: 1,
+            cached_content: contentData.data.content // Cache'den gelen content'i gönder
+          }),
+        });
+
+        if (!response.ok) {
+          const errorData = await response.json();
+          throw new Error(errorData.error || `Failed to process ${urlType} content.`);
+        }
+
+        const data = await response.json();
+        
+        if (!data.success) {
+          throw new Error(data.error || `Failed to analyze ${urlType} content.`);
+        }
+
+        // Debug: Backend response'unu kontrol et
+        console.log('🔍 Backend response:', data);
+        console.log('🔍 Original text type:', typeof data.data?.original_text);
+        console.log('🔍 Adapted text type:', typeof data.data?.adaptation?.adapted_text);
+
+        // Web analizinden gelen veriyi ayarla
+        const originalTextValue = typeof data.data?.original_text === 'string' ? data.data.original_text : 'Content extracted from web';
+        
+        // adapted_text object olabilir, string'e çevir
+        let adaptedTextValue = 'No adaptation available';
+        if (data.data?.adaptation?.adapted_text) {
+          if (typeof data.data.adaptation.adapted_text === 'string') {
+            adaptedTextValue = data.data.adaptation.adapted_text;
+          } else if (typeof data.data.adaptation.adapted_text === 'object') {
+            // Object ise, sadece adapted_text field'ını al
+            adaptedTextValue = data.data.adaptation.adapted_text.adapted_text || 'No adaptation available';
+          }
+        } else if (data.data?.adapted_text) {
+          // Direkt adapted_text field'ı da olabilir
+          if (typeof data.data.adapted_text === 'string') {
+            adaptedTextValue = data.data.adapted_text;
+          } else if (typeof data.data.adapted_text === 'object') {
+            adaptedTextValue = data.data.adapted_text.adapted_text || 'No adaptation available';
+          }
+        }
+        
+        // Markdown ** işaretlerini temizle
+        adaptedTextValue = adaptedTextValue.replace(/\*\*/g, '');
+        
+        console.log('🔍 Final adapted text:', adaptedTextValue);
+        
+        setOriginalText(originalTextValue);
+        setAdaptedText(adaptedTextValue);
+        
+        // Analiz sonuçlarını localStorage'a kaydet
+        localStorage.setItem('originalText', originalTextValue);
+        localStorage.setItem('adaptedText', adaptedTextValue);
+        localStorage.setItem('webUrl', url);
+        
+        // Adaptation result objesi oluştur (YouTube formatına uygun)
+        const adaptationResult = {
+          original_text: originalTextValue,
+          adapted_text: adaptedTextValue,
+          original_word_analysis: data.data.word_analysis || undefined,
+          adapted_word_analysis: undefined,
+          original_analysis: data.data.analysis || {
+            total_words: 0,
+            known_words: 0,
+            unknown_words: 0,
+            known_percentage: 0,
+            unknown_percentage: 0,
+            difficulty_level: 'unknown'
+          },
+          adapted_analysis: {
+            total_words: typeof adaptedTextValue === 'string' && adaptedTextValue.trim() ? adaptedTextValue.split(' ').length : 0,
+            known_words: 0,
+            unknown_words: 0,
+            known_percentage: 0,
+            unknown_percentage: 0,
+            difficulty_level: 'unknown'
+          },
+          user_vocabulary_size: 0,
+          adaptation_method: 'gemini',
+          improvement: {
+            unknown_percentage_change: 0,
+            closer_to_target: true
+          }
+        };
+        
+        setAdaptationResult(adaptationResult);
+        
+        // Kütüphaneye kaydetmeyi dene (aktif)
+        try {
+          const saveResponse = await fetch('http://localhost:8000/api/web-library/save-web-content', {
+            method: 'POST',
+            headers: {
+              'Content-Type': 'application/json',
+            },
+            body: JSON.stringify({
+              web_url: url,
+              include_examples: false,
+              include_adaptation: true,
+              user_id: 1
+            }),
+          });
+          
+          if (saveResponse.ok) {
+            const saveData = await saveResponse.json();
+            if (saveData.success) {
+              console.log('✅ Content saved to library:', saveData.data.message);
+            }
+          } else {
+            console.warn('⚠️ Library save failed:', saveResponse.status);
+          }
+        } catch (saveError) {
+          console.warn('⚠️ Could not save to library:', saveError);
+        }
+        
+        setError(`✅ ${urlType.toUpperCase()} içeriği başarıyla analiz edildi!`);
+        
+        // Word analysis'i reload et
+        if (data.data.original_text) {
+          reloadWordAnalysis();
+        }
+        
+      } catch (err: any) {
+        setError(err.message);
+      } finally {
+        setIsLoading(false);
+      }
+      return;
+    }
+
+    // YouTube için eski kodu kullan
     try {
       const token = localStorage.getItem('token');
       
-      // Use library endpoint to get or create transcript
       const response = await fetch(`http://localhost:8000/api/library/transcript`, {
         method: 'POST',
         headers: {
@@ -324,191 +534,8 @@ export default function Home() {
       
       setOriginalText(transcriptData.original_text);
       
-      // Always try to create/get AI adaptation
-      let adaptedText = transcriptData.adapted_text || '';
-      
-      // If we don't have adapted text, or want to regenerate, create new adaptation
-      if (!adaptedText || !transcriptData.from_library) {
-        try {
-          // Create AI adaptation using the library adaptation endpoint
-          const adaptResponse = await fetch(`http://localhost:8000/api/library/transcript/video/${transcriptData.video_id}/adapt`, {
-            method: 'POST',
-            headers: {
-              'Authorization': `Bearer ${token}`,
-              'Content-Type': 'application/json',
-            },
-            body: JSON.stringify({ 
-              username: currentUser,
-              target_unknown_percentage: 10.0
-            }),
-          });
-          
-          if (adaptResponse.ok) {
-            const adaptData = await adaptResponse.json();
-            if (adaptData.success) {
-              adaptedText = adaptData.data.adapted_text;
-            }
-          }
-        } catch (error) {
-          console.error('Failed to create AI adaptation:', error);
-        }
-      }
-      
-      setAdaptedText(adaptedText);
-      
-      // Save to localStorage
-      localStorage.setItem('originalText', transcriptData.original_text);
-      localStorage.setItem('adaptedText', adaptedText);
-      localStorage.setItem('youtubeUrl', url);
-      
-      // Analyze original text to get word status for coloring
-      let originalWordAnalysis = null;
-      let originalAnalysis = {
-        total_words: transcriptData.word_count || 0,
-        known_words: 0,
-        unknown_words: 0,
-        known_percentage: 0,
-        unknown_percentage: 0,
-        difficulty_level: 'unknown'
-      };
-      
-      try {
-        const analysisResponse = await fetch('http://localhost:8000/api/text-analysis/analyze', {
-          method: 'POST',
-          headers: { 
-            'Content-Type': 'application/json',
-            'Authorization': `Bearer ${token}`,
-          },
-          body: JSON.stringify({
-            text: transcriptData.original_text,
-            username: currentUser
-          }),
-        });
-        
-        if (analysisResponse.ok) {
-          const analysisData = await analysisResponse.json();
-          if (analysisData.success && analysisData.data) {
-            originalWordAnalysis = analysisData.data.word_analysis;
-            originalAnalysis = {
-              total_words: analysisData.data.analysis?.total_unique_words_in_text || 0,
-              known_words: analysisData.data.analysis?.known_words_in_text || 0,
-              unknown_words: analysisData.data.analysis?.unknown_words_in_text || 0,
-              known_percentage: analysisData.data.analysis?.known_percentage || 0,
-              unknown_percentage: analysisData.data.analysis?.unknown_percentage || 0,
-              difficulty_level: analysisData.data.analysis?.text_difficulty || 'unknown'
-            };
-          }
-        }
-      } catch (error) {
-        console.error('Failed to analyze original text:', error);
-      }
-      
-      // Analyze adapted text if available
-      let adaptedWordAnalysis = null;
-      let adaptedAnalysis = {
-        total_words: adaptedText ? adaptedText.split(' ').length : 0,
-        known_words: 0,
-        unknown_words: 0,
-        known_percentage: 0,
-        unknown_percentage: 0,
-        difficulty_level: 'unknown'
-      };
-
-      if (adaptedText && adaptedText.trim()) {
-        try {
-          const adaptedAnalysisResponse = await fetch('http://localhost:8000/api/text-analysis/analyze', {
-            method: 'POST',
-            headers: { 
-              'Content-Type': 'application/json',
-              'Authorization': `Bearer ${token}`,
-            },
-            body: JSON.stringify({
-              text: adaptedText,
-              username: currentUser
-            }),
-          });
-          
-          if (adaptedAnalysisResponse.ok) {
-            const adaptedAnalysisData = await adaptedAnalysisResponse.json();
-            if (adaptedAnalysisData.success && adaptedAnalysisData.data) {
-              adaptedWordAnalysis = adaptedAnalysisData.data.word_analysis;
-              adaptedAnalysis = {
-                total_words: adaptedAnalysisData.data.analysis?.total_unique_words_in_text || 0,
-                known_words: adaptedAnalysisData.data.analysis?.known_words_in_text || 0,
-                unknown_words: adaptedAnalysisData.data.analysis?.unknown_words_in_text || 0,
-                known_percentage: adaptedAnalysisData.data.analysis?.known_percentage || 0,
-                unknown_percentage: adaptedAnalysisData.data.analysis?.unknown_percentage || 0,
-                difficulty_level: adaptedAnalysisData.data.analysis?.text_difficulty || 'unknown'
-              };
-            }
-          }
-        } catch (error) {
-          console.error('Failed to analyze adapted text:', error);
-        }
-      }
-
-      // Create adaptation result object for compatibility
-      const adaptationResult = {
-        original_text: transcriptData.original_text,
-        adapted_text: adaptedText,
-        original_word_analysis: originalWordAnalysis,
-        adapted_word_analysis: adaptedWordAnalysis,
-        original_analysis: originalAnalysis,
-        adapted_analysis: adaptedAnalysis,
-        user_vocabulary_size: 0,
-        adaptation_method: transcriptData.from_library ? 'library' : 'gemini',
-        improvement: {
-          unknown_percentage_change: originalAnalysis.unknown_percentage - adaptedAnalysis.unknown_percentage,
-          closer_to_target: adaptedAnalysis.unknown_percentage < originalAnalysis.unknown_percentage
-        }
-      };
-      
-      setAdaptationResult(adaptationResult);
-      
-      // Perform word analysis for the original text
-      try {
-        const analysisResponse = await fetch(`http://localhost:8000/api/text-analysis/analyze`, {
-          method: 'POST',
-          headers: {
-            'Content-Type': 'application/json',
-            'Authorization': `Bearer ${token}`,
-          },
-          body: JSON.stringify({
-            text: transcriptData.original_text,
-            username: currentUser
-          }),
-        });
-        
-        if (analysisResponse.ok) {
-          const analysisData = await analysisResponse.json();
-          if (analysisData.success) {
-            // Update adaptation result with word analysis
-            const updatedResult = {
-              ...adaptationResult,
-              original_word_analysis: analysisData.data.word_analysis,
-              original_analysis: {
-                total_words: analysisData.data.analysis?.total_unique_words_in_text || 0,
-                known_words: analysisData.data.analysis?.known_words_in_text || 0,
-                unknown_words: analysisData.data.analysis?.unknown_words_in_text || 0,
-                known_percentage: analysisData.data.analysis?.known_percentage || 0,
-                unknown_percentage: analysisData.data.analysis?.unknown_percentage || 0,
-                difficulty_level: analysisData.data.analysis?.text_difficulty || 'unknown'
-              }
-            };
-            setAdaptationResult(updatedResult);
-            
-            // Reload word analysis immediately to ensure proper display
-            reloadWordAnalysis();
-          }
-        }
-      } catch (error) {
-        console.error('Failed to analyze words:', error);
-      }
-      
-      // Show success message if from library
-      if (transcriptData.from_library) {
-        setError('✅ Bu video kütüphaneden getirildi! Yeni transcript işlenmedi.');
-      }
+      // Show success message
+      setError('✅ YouTube video başarıyla işlendi!');
       
     } catch (err: any) {
       setError(err.message);
@@ -528,7 +555,16 @@ export default function Home() {
       console.log('Selected text:', selectedText);
       setSelectedText(selectedText);
       setSelectedWord(selectedText);
-      handleWordExplanation(selectedText);
+      
+      // Open word popup for selected text (center of screen since no event)
+      setWordPopup({
+        word: selectedText.toLowerCase().replace(/[^\w]/g, ''),
+        isOpen: true,
+        position: {
+          x: window.innerWidth / 2,
+          y: window.innerHeight / 2
+        }
+      });
       
       // Reload word analysis from backend to include selected text
       if (adaptationResult && originalText) {
@@ -614,66 +650,26 @@ export default function Home() {
     }
   };
 
-  const handleWordClick = (word: string) => {
-    setSelectedWord(word);
-    handleWordExplanation(word);
-  };
-
-  const handleWordExplanation = async (wordOrPhrase: string) => {
-    setShowExplanationModal(true);
-    setIsLoadingExplanation(true);
-    setWordExplanation(null);
+  const handleWordClick = (word: string, event: React.MouseEvent) => {
+    console.log('🎯 handleWordClick called with word:', word);
     
-    try {
-      // Clean the word/phrase - remove punctuation and extra spaces
-      const cleanText = wordOrPhrase.replace(/[^\w\s]/g, '').replace(/\s+/g, ' ').trim().toLowerCase();
-      
-      // Use the new smart API endpoint that actually works
-      const response = await fetch('http://localhost:8000/api/smart/word-explanation', {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-        },
-        body: JSON.stringify({ 
-          word: cleanText
-        }),
-      });
-
-      if (response.ok) {
-        const data = await response.json();
-        console.log('Smart API explanation response:', data);
-        
-        if (data.success && data.data) {
-          // Convert new API format to old modal format
-          setWordExplanation({
-            translation: data.data.turkish_meaning || "Çeviri bulunamadı",
-            example: data.data.english_example || `Example: "${cleanText}" is used in sentences.`,
-            example_explanation: data.data.example_translation || "Bu kelime/kelime grubu için açıklama bulunamadı."
-          });
-        } else {
-          // Fallback explanation
-          setWordExplanation({
-            translation: "Çeviri bulunamadı",
-            example: `Example: "${cleanText}" is used in sentences.`,
-            example_explanation: "Bu kelime/kelime grubu için açıklama bulunamadı."
-          });
-        }
-      } else {
-        throw new Error('Failed to get explanation');
+    const rect = event.currentTarget.getBoundingClientRect();
+    const newPopupState = {
+      word: word.toLowerCase().replace(/[^\w]/g, ''), // Clean the word
+      isOpen: true,
+      position: {
+        x: rect.left + window.scrollX,
+        y: rect.bottom + window.scrollY + 5
       }
-    } catch (err) {
-      console.error('Failed to get word explanation:', err);
-      setWordExplanation({
-        translation: "Bağlantı hatası",
-        example: `"${wordOrPhrase}" için açıklama alınamadı.`,
-        example_explanation: "Açıklama servisi şu anda kullanılamıyor."
-      });
-    } finally {
-      setIsLoadingExplanation(false);
-    }
+    };
+    
+    console.log('🎯 Setting wordPopup state:', newPopupState);
+    setWordPopup(newPopupState);
   };
 
   const handleAddWordToVocabulary = async (word: string, action: 'known' | 'unknown' | 'ignore') => {
+    console.log('🏠 HOMEPAGE handleAddWordToVocabulary called with:', { word, action });
+    
     setIsAddingWord(true);
     
     try {
@@ -688,22 +684,37 @@ export default function Home() {
       });
 
       if (response.ok) {
-        // Reload user stats to reflect changes
-        await loadUserStats();
+        const responseData = await response.json();
+        console.log('📝 Vocabulary add response:', responseData);
+        
+        // Kelime eklendiğinde veya güncellendiğinde stats'ları reload et
+        // responseData.is_new: yeni kelime eklendi
+        // responseData.action: kelime güncellendi (status değişti)
+        if (responseData.is_new || responseData.action) {
+          console.log('🔄 Reloading user stats after vocabulary change...');
+          await loadUserStats();
+        } else {
+          console.log('⚠️ No stats reload needed - no new word or action');
+        }
         
         // If we have adaptation result, reload word analysis to update colors
         if (adaptationResult && originalText) {
           await reloadWordAnalysis();
         }
         
-        // Close modal
-        setShowExplanationModal(false);
+        // Close popup
+        setWordPopup(prev => ({ ...prev, isOpen: false }));
         
         // Show success message
-        const responseData = await response.json();
         const actionText = action === 'known' ? 'bildiğin kelimeler listesine' : action === 'unknown' ? 'öğrenme listesine' : 'görmezden gelinen kelimeler listesine';
         const verb = responseData.updated ? 'güncellendi' : 'eklendi';
-        alert(`"${word}" ${actionText} ${verb}!`);
+        let message = `"${word}" ${actionText} ${verb}!`;
+        
+        if (responseData.is_new) {
+          message += '\n(Yeni kelime eklendi - istatistikler güncellendi)';
+        }
+        
+        alert(message);
       } else {
         throw new Error('Failed to add word');
       }
@@ -740,8 +751,15 @@ export default function Home() {
   };
 
   const renderClickableText = (text: string, isAdapted: boolean = false, wordAnalysis?: { word_status: { [key: string]: boolean } }) => {
+    // Type check - eğer text string değilse boş string kullan
+    const safeText = typeof text === 'string' ? text : '';
+    
+    if (!safeText || safeText.trim() === '') {
+      return <div className="text-gray-500 italic">No text available</div>;
+    }
+    
     // Smart word splitting that preserves contractions and common phrases
-    const parts = text.split(/(\b[a-zA-Z]+(?:'[a-zA-Z]+)?\b|\s+|[^\w\s])/);
+    const parts = safeText.split(/(\b[a-zA-Z]+(?:'[a-zA-Z]+)?\b|\s+|[^\w\s])/);
     
     return (
       <div 
@@ -766,8 +784,11 @@ export default function Home() {
             <span
               key={index}
               className={wordClass}
-              onClick={() => handleWordClick(cleanWord)}
-              title="Click to mark word as known/unknown/ignore"
+              onClick={(e) => {
+                console.log('🔥 CLICK DETECTED:', cleanWord);
+                handleWordClick(cleanWord, e);
+              }}
+              title="Click to get word explanation"
             >
               {part}
             </span>
@@ -1052,81 +1073,6 @@ export default function Home() {
               </div>
             )}
 
-            {/* Word Explanation Modal */}
-            {showExplanationModal && (
-              <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50 p-4">
-                <div className="bg-gray-800 rounded-lg p-6 max-w-md w-full">
-                  <div className="flex justify-between items-center mb-4">
-                    <h3 className="text-xl font-bold text-teal-400">
-                      📚 "{selectedWord}"
-                    </h3>
-                    <button
-                      onClick={() => setShowExplanationModal(false)}
-                      className="text-gray-400 hover:text-white text-2xl"
-                    >
-                      ✕
-                    </button>
-                  </div>
-                  
-                  {isLoadingExplanation ? (
-                    <div className="text-center py-4">
-                      <div className="animate-spin text-3xl">⏳</div>
-                      <p className="text-gray-400 mt-2">Loading explanation...</p>
-                    </div>
-                  ) : wordExplanation ? (
-                    <div className="space-y-4">
-                      <div>
-                        <span className="font-bold text-blue-400">🇹🇷 Türkçe:</span>
-                        <p className="text-gray-300 mt-1">{wordExplanation.translation}</p>
-                      </div>
-                      <div>
-                        <span className="font-bold text-green-400">📝 Example:</span>
-                        <p className="text-gray-300 mt-1 italic">"{wordExplanation.example}"</p>
-                      </div>
-                      <div>
-                        <span className="font-bold text-purple-400">💡 Açıklama:</span>
-                        <p className="text-gray-300 mt-1">{wordExplanation.example_explanation}</p>
-                      </div>
-                      
-                      {/* Word Action Buttons */}
-                      <div className="border-t border-gray-600 pt-4 mt-4">
-                        <p className="text-sm text-gray-400 mb-3 text-center">
-                          Bu kelimeyi nasıl işaretlemek istiyorsun?
-                        </p>
-                        <div className="flex flex-col gap-2">
-                          <button
-                            onClick={() => handleAddWordToVocabulary(selectedWord!, 'known')}
-                            disabled={isAddingWord}
-                            className="bg-green-600 hover:bg-green-700 disabled:bg-green-800 text-white px-4 py-2 rounded-lg flex items-center justify-center gap-2"
-                          >
-                            {isAddingWord ? '⏳' : '✅'} Biliyorum
-                          </button>
-                          <button
-                            onClick={() => handleAddWordToVocabulary(selectedWord!, 'unknown')}
-                            disabled={isAddingWord}
-                            className="bg-red-600 hover:bg-red-700 disabled:bg-red-800 text-white px-4 py-2 rounded-lg flex items-center justify-center gap-2"
-                          >
-                            {isAddingWord ? '⏳' : '❌'} Bilmiyorum (Öğren)
-                          </button>
-                          <button
-                            onClick={() => handleAddWordToVocabulary(selectedWord!, 'ignore')}
-                            disabled={isAddingWord}
-                            className="bg-gray-600 hover:bg-gray-700 disabled:bg-gray-800 text-white px-4 py-2 rounded-lg flex items-center justify-center gap-2"
-                          >
-                            {isAddingWord ? '⏳' : '🚫'} Görmezden Gel (İsim, yer adı vb.)
-                          </button>
-                        </div>
-                      </div>
-                    </div>
-                  ) : (
-                    <div className="text-center py-4">
-                      <p className="text-red-400">Failed to load explanation</p>
-                    </div>
-                  )}
-                </div>
-              </div>
-            )}
-
             {/* Smart AI Features Tab */}
             {activeTab === 'smart' && (
               <div className="bg-gray-900">
@@ -1139,6 +1085,16 @@ export default function Home() {
           </>
         )}
       </div>
+      
+      {/* Modern Word Explanation Popup */}
+      <WordExplanationPopup
+        word={wordPopup.word}
+        isOpen={wordPopup.isOpen}
+        onClose={() => setWordPopup(prev => ({ ...prev, isOpen: false }))}
+        position={wordPopup.position}
+        currentUser={currentUser}
+        onVocabularyAdded={loadUserStats}
+      />
     </main>
   );
 }

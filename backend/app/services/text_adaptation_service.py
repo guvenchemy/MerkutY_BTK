@@ -39,15 +39,17 @@ class TextAdaptationService:
     @staticmethod
     def get_user_known_words(username: str, db: Session) -> Set[str]:
         """
-        Get all words that user knows from database.
+        Get all words that user knows (status='known') from database.
         """
         try:
             user = db.query(User).filter(User.username == username).first()
             if not user:
                 return set()
             
+            # Sadece 'known' status'lu kelimeleri al
             user_vocab = db.query(UserVocabulary).filter(
-                UserVocabulary.user_id == user.id
+                UserVocabulary.user_id == user.id,
+                UserVocabulary.status == "known"  # Sadece bilinen kelimeler
             ).all()
             
             known_words = set()

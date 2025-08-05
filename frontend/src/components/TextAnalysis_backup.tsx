@@ -129,10 +129,12 @@ interface AnalysisResponse {
 }
 
 const TextAnalysis: React.FC = () => {
+  const [text, setText] = useState('');
   const [url, setUrl] = useState(''); // Tek URL input (YouTube, Medium, Wikipedia için)
   const [analysisResult, setAnalysisResult] = useState<TextAnalysisResult | null>(null);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState('');
+  const [activeTab, setActiveTab] = useState<'text' | 'url'>('text');
   const [includeAdaptation, setIncludeAdaptation] = useState(false);
   const [pdfGenerating, setPdfGenerating] = useState(false);
   const [userId] = useState<number>(1); // Geçici user ID
@@ -159,29 +161,61 @@ const TextAnalysis: React.FC = () => {
     return 'unsupported';
   };
 
-  // Text analysis - kaldırıldı, sadece URL analizi var
+  // Text analysis
+  const analyzeText = async () => {
+    if (!text.trim()) {
+      setError('Metin giriniz');
+      return;
+    }
+
+    if (text.length < 10) {
+      setError('En az 10 karakter gerekli');
+      return;
+    }
+
+    setLoading(true);
+    setError('');
+
+    try {
+      const response = await fetch('http://localhost:8000/api/text-analysis/analyze', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({
+          text: text,
+          include_examples: true,
+          include_adaptation: includeAdaptation,
+          user_id: userId,
+          username: `user_${userId}`
+        }),
+      });
+
+      const result: AnalysisResponse = await response.json();
+
+      if (result.success && result.data) {
+        setAnalysisResult(result.data);
+      } else {
+        setError(result.error || 'Analiz sırasında bir hata oluştu');
+      }
+    } catch (err) {
+      setError('Sunucuya bağlanırken hata oluştu');
+      console.error('Analysis error:', err);
+    } finally {
+      setLoading(false);
+    }
+  };
 
   // URL analysis (YouTube, Medium, Wikipedia)
   const analyzeUrl = async () => {
-    console.log('🚀 analyzeUrl başlatıldı');
-    console.log('📝 Mevcut state:', { url, includeAdaptation });
-    
     if (!url.trim()) {
-      console.log('❌ URL boş');
       setError('URL giriniz');
       return;
     }
 
     const urlType = detectUrlType(url);
     
-    console.log('🔍 URL algılama:', {
-      originalUrl: url,
-      detectedType: urlType,
-      cleanUrl: url.toLowerCase().trim()
-    });
-    
     if (urlType === 'unsupported') {
-      console.log('❌ Desteklenmeyen URL tipi');
       setError('Sadece YouTube, Medium ve Wikipedia linkleri desteklenmektedir');
       return;
     }
@@ -201,22 +235,11 @@ const TextAnalysis: React.FC = () => {
       if (urlType === 'youtube') {
         endpoint = 'http://localhost:8000/api/analysis/analyze-youtube';
         requestBody.video_url = url;
-        console.log('🎥 YouTube analizi için endpoint:', endpoint);
       } else if (urlType === 'medium' || urlType === 'wikipedia') {
         endpoint = 'http://localhost:8000/api/text-analysis/analyze-web';
         requestBody.web_url = url;
-        console.log('🌐 Web analizi için endpoint:', endpoint);
       }
 
-      console.log('📤 Gönderilen request:', {
-        endpoint,
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: requestBody
-      });
-
-      console.log('🔄 Fetch işlemi başlatılıyor...');
-      
       const response = await fetch(endpoint, {
         method: 'POST',
         headers: {
@@ -225,26 +248,9 @@ const TextAnalysis: React.FC = () => {
         body: JSON.stringify(requestBody),
       });
 
-      console.log('📡 Response alındı:', {
-        status: response.status,
-        statusText: response.statusText,
-        ok: response.ok,
-        headers: Object.fromEntries(response.headers.entries())
-      });
-
-      console.log('🔍 Response JSON parsing başlıyor...');
       const result: AnalysisResponse = await response.json();
-      
-      console.log('📥 Backend response:', {
-        status: response.status,
-        success: result.success,
-        error: result.error,
-        hasData: !!result.data,
-        fullResponse: result
-      });
 
       if (result.success && result.data) {
-        console.log('✅ Analiz başarılı, sonuçlar ayarlanıyor');
         setAnalysisResult(result.data);
         
         // YouTube IP block uyarısı kontrolü
@@ -253,7 +259,6 @@ const TextAnalysis: React.FC = () => {
         }
       } else {
         // Hata durumları
-        console.log('❌ Analiz hatası:', result.error);
         if (urlType === 'youtube' && (result.error?.includes('IP engeli') || result.error?.includes('IP block'))) {
           setError(`🚫 ${result.error}\n\n💡 Çözüm önerileri:\n• VPN kullanın\n• Farklı internet bağlantısı deneyin\n• Daha sonra tekrar deneyin`);
         } else {
@@ -261,61 +266,83 @@ const TextAnalysis: React.FC = () => {
         }
       }
     } catch (err) {
-      console.log('💥 Network/Parsing hatası:', {
-        error: err,
-        message: err instanceof Error ? err.message : String(err),
-        stack: err instanceof Error ? err.stack : undefined
-      });
-      
-      if (err instanceof TypeError && err.message.includes('fetch')) {
-        setError('Backend sunucusuna bağlanamadı. Backend çalışıyor mu? (http://localhost:8000)');
-      } else if (err instanceof SyntaxError) {
-        setError('Backend\'ten geçersiz response geldi (JSON parsing hatası)');
-      } else {
-        setError(`Bağlantı hatası: ${err instanceof Error ? err.message : String(err)}`);
-      }
-      
+      setError('Sunucuya bağlanırken hata oluştu');
       console.error('URL analysis error:', err);
     } finally {
-      console.log('🏁 analyzeUrl tamamlandı');
       setLoading(false);
     }
   };
 
   return (
     <div className="max-w-6xl mx-auto p-6 bg-gray-800 rounded-lg shadow-lg text-white">
-      <h2 className="text-3xl font-bold text-teal-400 mb-6">� Metin Adaptasyonu</h2>
+      <h2 className="text-3xl font-bold text-teal-400 mb-6">🔍 Metin Analizi</h2>
       
-      {/* Debug Info */}
-      <div className="mb-4 p-2 bg-gray-700 rounded text-sm">
-        <strong>Debug:</strong> URL: {url || 'boş'}
+      {/* Tab Navigation */}
+      <div className="flex mb-6 border-b border-gray-600">
+        <button
+          onClick={() => setActiveTab('text')}
+          className={`px-4 py-2 font-medium ${
+            activeTab === 'text'
+              ? 'text-teal-400 border-b-2 border-teal-400'
+              : 'text-gray-400 hover:text-gray-200'
+          }`}
+        >
+          📝 Metin Analizi
+        </button>
+        <button
+          onClick={() => setActiveTab('url')}
+          className={`px-4 py-2 font-medium ${
+            activeTab === 'url'
+              ? 'text-teal-400 border-b-2 border-teal-400'
+              : 'text-gray-400 hover:text-gray-200'
+          }`}
+        >
+          🔗 Link Analizi (YouTube, Medium, Wikipedia)
+        </button>
       </div>
-      
+
       {/* Input Section */}
       <div className="mb-6">
-        <div>
-          <label className="block text-sm font-medium text-gray-300 mb-2">
-            URL Linki:
-          </label>
-          <input
-            type="url"
-            value={url}
-            onChange={(e) => setUrl(e.target.value)}
-            placeholder="YouTube, Medium veya Wikipedia linki yapıştırın..."
-            className="w-full p-3 bg-gray-700 border border-gray-600 rounded-md text-white placeholder-gray-400 focus:ring-2 focus:ring-teal-500 focus:border-transparent"
-          />
-          <div className="text-sm text-gray-400 mt-2 space-y-1">
-            <p>🔗 <strong>Desteklenen linkler:</strong></p>
-            <div className="ml-2 space-y-1">
-              <p>• <span className="text-red-400">🎥 YouTube:</span> youtube.com, youtu.be</p>
-              <p>• <span className="text-orange-400">📝 Medium:</span> medium.com makale linkleri</p>
-              <p>• <span className="text-blue-400">📚 Wikipedia:</span> wikipedia.org sayfaları</p>
-            </div>
-            <p className="text-xs text-gray-500 mt-1">
-              💡 URL tipini otomatik algılar ve ona göre içeriği çeker
+        {activeTab === 'text' ? (
+          <div>
+            <label className="block text-sm font-medium text-gray-300 mb-2">
+              Analiz edilecek metin:
+            </label>
+            <textarea
+              value={text}
+              onChange={(e) => setText(e.target.value)}
+              placeholder="Analiz etmek istediğiniz metni buraya yazın..."
+              className="w-full h-32 p-3 bg-gray-700 border border-gray-600 rounded-md text-white placeholder-gray-400 focus:ring-2 focus:ring-teal-500 focus:border-transparent"
+            />
+            <p className="text-sm text-gray-400 mt-1">
+              Minimum 10 karakter gerekli. Mevcut: {text.length} karakter
             </p>
           </div>
-        </div>
+        ) : (
+          <div>
+            <label className="block text-sm font-medium text-gray-300 mb-2">
+              URL Linki:
+            </label>
+            <input
+              type="url"
+              value={url}
+              onChange={(e) => setUrl(e.target.value)}
+              placeholder="YouTube, Medium veya Wikipedia linki yapıştırın..."
+              className="w-full p-3 bg-gray-700 border border-gray-600 rounded-md text-white placeholder-gray-400 focus:ring-2 focus:ring-teal-500 focus:border-transparent"
+            />
+            <div className="text-sm text-gray-400 mt-2 space-y-1">
+              <p>🔗 <strong>Desteklenen linkler:</strong></p>
+              <div className="ml-2 space-y-1">
+                <p>• <span className="text-red-400">🎥 YouTube:</span> youtube.com, youtu.be</p>
+                <p>• <span className="text-orange-400">📝 Medium:</span> medium.com makale linkleri</p>
+                <p>• <span className="text-blue-400">📚 Wikipedia:</span> wikipedia.org sayfaları</p>
+              </div>
+              <p className="text-xs text-gray-500 mt-1">
+                💡 URL tipini otomatik algılar ve ona göre içeriği çeker
+              </p>
+            </div>
+          </div>
+        )}
         
         {/* Options */}
         <div className="mt-4 p-4 bg-gray-700 rounded-lg">
@@ -338,7 +365,7 @@ const TextAnalysis: React.FC = () => {
         
         <div className="flex gap-3 mt-4">
           <button
-            onClick={analyzeUrl}
+            onClick={activeTab === 'text' ? analyzeText : analyzeUrl}
             disabled={loading}
             className="bg-teal-600 text-white px-6 py-2 rounded-md hover:bg-teal-700 disabled:bg-teal-800 disabled:cursor-not-allowed transition-colors"
           >
@@ -350,6 +377,7 @@ const TextAnalysis: React.FC = () => {
               onClick={() => {
                 setAnalysisResult(null);
                 setError('');
+                setText('');
                 setUrl('');
               }}
               className="bg-gray-600 text-white px-6 py-2 rounded-md hover:bg-gray-700 transition-colors"
