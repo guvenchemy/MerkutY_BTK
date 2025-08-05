@@ -3,8 +3,9 @@
 import { useState, useEffect } from 'react';
 import { useRouter } from 'next/navigation';
 import VocabularyUpload from '../components/VocabularyUpload';
-import { SmartFeaturesDemo } from '../components/smart';
+import SmartFeaturesDemo from '../components/smart/SmartFeaturesDemo';
 import Library from '../components/Library';
+import VocabularyManager from '../components/smart/VocabularyManager';
 import WordExplanationPopup from '../components/smart/WordExplanationPopup';
 
 // Types for our API responses
@@ -142,7 +143,7 @@ export default function Home() {
   // Settings State - Removed target percentage (not needed)
 
   // Tab State
-  const [activeTab, setActiveTab] = useState<'adaptation' | 'smart' | 'library'>('adaptation');
+  const [activeTab, setActiveTab] = useState<'adaptation' | 'smart' | 'library' | 'vocabulary'>('adaptation');
   const [smartAnalysisText, setSmartAnalysisText] = useState<string>('');
 
   // Grammar Analysis State - Now handled in Smart AI Teacher tab
@@ -398,14 +399,30 @@ export default function Home() {
         // Web analizinden gelen veriyi ayarla
         const originalTextValue = typeof data.data?.original_text === 'string' ? data.data.original_text : 'Content extracted from web';
         
-        // adapted_text object olabilir, string'e çevir
+        // adapted_text object olabilir, güvenli string'e çevir
         let adaptedTextValue = 'No adaptation available';
         if (data.data?.adaptation?.adapted_text) {
           if (typeof data.data.adaptation.adapted_text === 'string') {
             adaptedTextValue = data.data.adaptation.adapted_text;
           } else if (typeof data.data.adaptation.adapted_text === 'object') {
-            // Object ise, sadece adapted_text field'ını al
-            adaptedTextValue = data.data.adaptation.adapted_text.adapted_text || 'No adaptation available';
+            // Object ise, içindeki text fieldları bul ve birleştir
+            const textObj = data.data.adaptation.adapted_text;
+            console.log('🔍 Object adapted_text:', textObj);
+            
+            // Object içindeki tüm string değerleri birleştir
+            if (textObj.adapted_text && typeof textObj.adapted_text === 'string') {
+              adaptedTextValue = textObj.adapted_text;
+            } else {
+              // Object'in values'larını string'e çevir ve birleştir
+              const textValues = Object.values(textObj)
+                .filter(val => typeof val === 'string' && val.trim().length > 0)
+                .join(' ');
+              
+              adaptedTextValue = textValues || 'No valid adaptation found';
+            }
+          } else {
+            // Başka tip ise string'e çevir
+            adaptedTextValue = String(data.data.adaptation.adapted_text || 'No adaptation available');
           }
         } else if (data.data?.adapted_text) {
           // Direkt adapted_text field'ı da olabilir
@@ -871,12 +888,29 @@ export default function Home() {
                     📚 Kütüphane
                   </button>
                 )}
+                {isLoggedIn && (
+                  <button
+                    onClick={() => setActiveTab('vocabulary')}
+                    className={`px-6 py-3 font-medium text-sm transition-colors ${
+                      activeTab === 'vocabulary'
+                        ? 'text-blue-400 border-b-2 border-blue-400'
+                        : 'text-gray-400 hover:text-blue-300'
+                    }`}
+                  >
+                    📖 Kelime Defterim
+                  </button>
+                )}
               </div>
             </div>
 
             {/* Tab Content */}
             {activeTab === 'library' ? (
               <Library currentUser={currentUser} userLevel={userStats?.level || 'A1'} />
+            ) : activeTab === 'vocabulary' ? (
+              <VocabularyManager 
+                currentUser={currentUser} 
+                onVocabularyUpdated={loadUserStats}
+              />
             ) : activeTab === 'adaptation' && (
               <div className="flex flex-col lg:flex-row gap-8 px-0">
                 {/* Sol Taraf - Kontroller */}

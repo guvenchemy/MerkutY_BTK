@@ -199,6 +199,49 @@ async def add_word_to_vocabulary(request: AddWordRequest, db: Session = Depends(
         db.rollback()
         raise HTTPException(status_code=500, detail=f"Failed to add word: {str(e)}")
 
+@router.get("/user-words/{username}")
+async def get_user_words(username: str, db: Session = Depends(get_db)):
+    """
+    Get all vocabulary words for a specific user, organized by status
+    """
+    try:
+        # Get user
+        user = db.query(User).filter(User.username == username).first()
+        if not user:
+            raise HTTPException(status_code=404, detail=f"User '{username}' not found")
+        
+        # Get all user vocabulary with word details
+        user_words = db.query(UserVocabulary, Vocabulary).join(
+            Vocabulary, UserVocabulary.vocabulary_id == Vocabulary.id
+        ).filter(
+            UserVocabulary.user_id == user.id
+        ).order_by(UserVocabulary.created_at.desc()).all()
+        
+        # Format response
+        words_list = []
+        for user_vocab, vocab in user_words:
+            # Handle potential None values for datetime fields
+            created_at = user_vocab.created_at.isoformat() if user_vocab.created_at else ""
+            updated_at = user_vocab.updated_at.isoformat() if user_vocab.updated_at else ""
+            
+            words_list.append({
+                "id": user_vocab.id,
+                "word": vocab.word,
+                "translation": user_vocab.translation or "",  # Only use user's translation
+                "status": user_vocab.status,
+                "created_at": created_at,
+                "updated_at": updated_at,
+                "vocabulary_id": vocab.id,
+                "difficulty_level": vocab.difficulty_level or 1
+            })
+        
+        return words_list
+        
+    except HTTPException:
+        raise
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Failed to get user words: {str(e)}")
+
 @router.get("/users")
 async def list_users(db: Session = Depends(get_db)):
     """

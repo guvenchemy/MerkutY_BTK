@@ -22,6 +22,15 @@ export default function SmartGrammarExplanation({
   const [showQuizAnswers, setShowQuizAnswers] = useState<Set<string>>(new Set());
   const [markingStatus, setMarkingStatus] = useState<{ [key: string]: boolean }>({});
 
+  // Debug logging to catch the object issue
+  console.log('🔍 SmartGrammarExplanation - explanations:', explanations);
+  
+  explanations.forEach((exp, idx) => {
+    console.log(`🔍 Explanation ${idx}:`, exp);
+    console.log(`🔍 example_from_text type:`, typeof exp.example_from_text);
+    console.log(`🔍 example_from_text value:`, exp.example_from_text);
+  });
+
   const toggleCard = (patternName: string) => {
     const newExpanded = new Set(expandedCards);
     if (newExpanded.has(patternName)) {
@@ -148,11 +157,45 @@ export default function SmartGrammarExplanation({
           exp.example_from_text.forEach((example, idx) => {
             if (typeof example === 'string') {
               addText(`Ornek ${idx + 1}: "${example}"`);
+            } else if (example && typeof example === 'object') {
+              if ('sentence' in example && 'analysis' in example) {
+                // GrammarExample type
+                addText(`Ornek ${idx + 1}: "${String(example.sentence || '')}"`);
+                y -= 3;
+                addText(`    ${String(example.analysis || '')}`, 10);
+              } else if ('sentence' in example && 'preposition' in example) {
+                // PrepositionExample type
+                addText(`Ornek ${idx + 1}: "${String(example.sentence || '')}"`);
+                y -= 3;
+                addText(`    Edat: ${String(example.preposition || '')}`, 10);
+                if (example.explanation) {
+                  y -= 3;
+                  addText(`    Aciklama: ${String(example.explanation)}`, 10);
+                }
+                if (example.turkish_explanation) {
+                  y -= 3;
+                  addText(`    Turkce: ${String(example.turkish_explanation)}`, 10);
+                }
+              } else if ('example' in example && 'explanation' in example) {
+                // SimpleExample type
+                addText(`Ornek ${idx + 1}: "${String(example.example || '')}"`);
+                if (example.explanation) {
+                  y -= 3;
+                  addText(`    Aciklama: ${String(example.explanation)}`, 10);
+                }
+              } else {
+                // Generic object - try to extract text
+                const values = Object.values(example).filter(val => 
+                  typeof val === 'string' && val.trim().length > 0
+                );
+                addText(`Ornek ${idx + 1}: "${values[0] || 'Gecersiz ornek'}"`);
+                if (values.length > 1) {
+                  y -= 3;
+                  addText(`    ${values.slice(1).join(' - ')}`, 10);
+                }
+              }
             } else {
-              addText(`Ornek ${idx + 1}: "${example.sentence}"`);
-              // Indent analysis
-              y -= 3;
-              addText(`    ${example.analysis}`, 10);
+              addText(`Ornek ${idx + 1}: "${String(example || 'Gecersiz ornek')}"`);
             }
           });
         } else if (typeof exp.example_from_text === 'string') {
@@ -247,26 +290,97 @@ export default function SmartGrammarExplanation({
                 <p className="text-sm text-gray-700">"{explanation.example_from_text}"</p>
               ) : Array.isArray(explanation.example_from_text) ? (
                 <div className="space-y-2">
-                  {explanation.example_from_text.map((example, idx) => (
-                    <div key={idx} className="text-sm">
-                      {typeof example === 'string' ? (
-                        <p className="text-gray-700">
+                  {explanation.example_from_text.map((example, idx) => {
+                    // Safe type checking for different object types
+                    if (typeof example === 'string') {
+                      return (
+                        <p key={idx} className="text-gray-700">
                           <span className="font-medium">Örnek {idx + 1}:</span> "{example}"
                         </p>
-                      ) : 'sentence' in example ? (
-                        <>
-                          <p className="text-gray-700">
-                            <span className="font-medium">Örnek {idx + 1}:</span> "{example.sentence}"
-                          </p>
-                          {example.analysis && (
-                            <p className="text-gray-600 text-xs mt-1 pl-4">
-                              {example.analysis}
+                      );
+                    } else if (example && typeof example === 'object') {
+                      // Check for different object structures
+                      if ('sentence' in example && 'analysis' in example) {
+                        // GrammarExample type
+                        return (
+                          <div key={idx} className="text-sm">
+                            <p className="text-gray-700">
+                              <span className="font-medium">Örnek {idx + 1}:</span> "{String(example.sentence || '')}"
                             </p>
-                          )}
-                        </>
-                      ) : null}
-                    </div>
-                  ))}
+                            {example.analysis && (
+                              <p className="text-gray-600 text-xs mt-1 pl-4">
+                                {String(example.analysis)}
+                              </p>
+                            )}
+                          </div>
+                        );
+                      } else if ('sentence' in example && 'preposition' in example) {
+                        // PrepositionExample type
+                        return (
+                          <div key={idx} className="text-sm">
+                            <p className="text-gray-700">
+                              <span className="font-medium">Örnek {idx + 1}:</span> "{String(example.sentence || '')}"
+                            </p>
+                            <div className="mt-1 pl-4 space-y-1">
+                              <p className="text-blue-600 text-xs">
+                                <span className="font-medium">Edat:</span> {String(example.preposition || '')}
+                              </p>
+                              {example.explanation && (
+                                <p className="text-gray-600 text-xs">
+                                  <span className="font-medium">Açıklama:</span> {String(example.explanation)}
+                                </p>
+                              )}
+                              {example.turkish_explanation && (
+                                <p className="text-green-600 text-xs">
+                                  <span className="font-medium">Türkçe:</span> {String(example.turkish_explanation)}
+                                </p>
+                              )}
+                            </div>
+                          </div>
+                        );
+                      } else if ('example' in example && 'explanation' in example) {
+                        // SimpleExample type
+                        return (
+                          <div key={idx} className="text-sm">
+                            <p className="text-gray-700">
+                              <span className="font-medium">Örnek {idx + 1}:</span> "{String(example.example || '')}"
+                            </p>
+                            {example.explanation && (
+                              <p className="text-gray-600 text-xs mt-1 pl-4">
+                                <span className="font-medium">Açıklama:</span> {String(example.explanation)}
+                              </p>
+                            )}
+                          </div>
+                        );
+                      } else {
+                        // Generic object handling - try to extract meaningful text
+                        const objectValues = Object.values(example).filter(val => 
+                          typeof val === 'string' && val.trim().length > 0
+                        );
+                        
+                        return (
+                          <div key={idx} className="text-sm">
+                            <p className="text-gray-700">
+                              <span className="font-medium">Örnek {idx + 1}:</span> 
+                              {objectValues.length > 0 ? ` "${objectValues[0]}"` : ' Geçersiz örnek'}
+                            </p>
+                            {objectValues.length > 1 && (
+                              <p className="text-gray-600 text-xs mt-1 pl-4">
+                                {objectValues.slice(1).join(' • ')}
+                              </p>
+                            )}
+                          </div>
+                        );
+                      }
+                    } else {
+                      // Fallback for unknown types
+                      return (
+                        <p key={idx} className="text-gray-700">
+                          <span className="font-medium">Örnek {idx + 1}:</span> "{String(example || 'Geçersiz örnek')}"
+                        </p>
+                      );
+                    }
+                  })}
                 </div>
               ) : (
                 <p className="text-sm text-gray-700 italic">Örnek bulunamadı</p>

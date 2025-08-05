@@ -15,14 +15,30 @@ interface SmartFeaturesDemoProps {
 }
 
 export default function SmartFeaturesDemo({ username, initialText }: SmartFeaturesDemoProps) {
+  // Debug: initialText'i kontrol et
+  console.log('🔍 SmartFeaturesDemo initialText:', initialText);
+  console.log('🔍 SmartFeaturesDemo initialText type:', typeof initialText);
+  
   // Real user ID state (fetched from username)
   const [userId, setUserId] = useState<number | null>(null);
   const [userIdLoading, setUserIdLoading] = useState(true);
   
-  // Demo text samples - use initialText if provided, otherwise default
+  // Safe initialText processing - ensure it's always a string
+  const safeInitialText = (() => {
+    if (!initialText) return "";
+    if (typeof initialText === 'string') return initialText;
+    if (typeof initialText === 'object') {
+      console.warn('🚨 SmartFeaturesDemo received object as initialText:', initialText);
+      // Object'in string'e çevrilmesini engelle
+      return "";
+    }
+    return String(initialText);
+  })();
+  
+  // Demo text samples - use safeInitialText if provided, otherwise default
   const [demoText, setDemoText] = useState(
-    initialText && initialText.trim() 
-      ? initialText 
+    safeInitialText.trim() 
+      ? safeInitialText 
       : "I have been learning English for two years and it is amazing"
   );
   
@@ -47,8 +63,14 @@ export default function SmartFeaturesDemo({ username, initialText }: SmartFeatur
 
   // Update demo text when initialText changes
   useEffect(() => {
-    if (initialText && initialText.trim()) {
-      setDemoText(initialText);
+    if (initialText) {
+      // Safe processing
+      if (typeof initialText === 'string' && initialText.trim()) {
+        setDemoText(initialText);
+      } else if (typeof initialText === 'object') {
+        console.warn('🚨 useEffect: initialText is object, ignoring update');
+        // Object'i set etme
+      }
     }
   }, [initialText]);
 

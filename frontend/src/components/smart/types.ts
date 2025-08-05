@@ -18,11 +18,23 @@ export interface GrammarExample {
   analysis: string;
 }
 
+export interface PrepositionExample {
+  sentence: string;
+  preposition: string;
+  explanation: string;
+  turkish_explanation: string;
+}
+
+export interface SimpleExample {
+  example: string;
+  explanation: string;
+}
+
 export interface GrammarExplanation {
   pattern_name: string;
   pattern_display_name: string;
   user_level: string;
-  example_from_text: string | string[] | GrammarExample[];
+  example_from_text: string | string[] | GrammarExample[] | PrepositionExample[] | SimpleExample[];
   structure_rule: string;
   usage_purpose: string;
   text_analysis: string;

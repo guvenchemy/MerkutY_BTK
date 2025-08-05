@@ -649,7 +649,7 @@ async def add_vocabulary(
         if not request.translation or len(request.translation.strip()) < 1:
             raise HTTPException(status_code=400, detail="Translation cannot be empty")
         
-        if request.status not in ['known', 'unknown', 'ignored', 'learning']:
+        if request.status not in ['known', 'unknown', 'ignore', 'learning']:
             raise HTTPException(status_code=400, detail=f"Invalid status: {request.status}")
         
         # Kelimeyi veritabanına ekle

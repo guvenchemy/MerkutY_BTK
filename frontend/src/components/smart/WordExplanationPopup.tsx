@@ -111,7 +111,7 @@ export default function WordExplanationPopup({
     }
   };
 
-  const addToVocabulary = async (status: 'known' | 'unknown' | 'learning' | 'ignored') => {
+  const addToVocabulary = async (status: 'known' | 'unknown' | 'learning' | 'ignore') => {
     console.log('🚀 WordExplanationPopup.addToVocabulary called with status:', status);
     
     if (!userId || !explanation) {
@@ -130,7 +130,7 @@ export default function WordExplanationPopup({
           user_id: userId, // Use dynamic user ID
           word: word,
           translation: explanation.turkish_meaning || '',
-          status: status === 'ignored' ? 'ignore' : status
+          status: status
         }),
       });
 
@@ -140,7 +140,8 @@ export default function WordExplanationPopup({
       if (result.success) {
         const statusText = status === 'known' ? 'bilinen kelimeler' : 
                           status === 'learning' ? 'öğrenme' : 
-                          status === 'unknown' ? 'öğrenme' : 'görmezden gelinen kelimeler';
+                          status === 'unknown' ? 'öğrenme' : 
+                          status === 'ignore' ? 'görmezden gelinen kelimeler' : 'bilinmeyen';
                           
         let message = `"${word}" kelimesi ${statusText} listesine eklendi!`;
         
@@ -361,7 +362,7 @@ export default function WordExplanationPopup({
               {/* Secondary actions */}
               <div className="flex gap-2">
                 <button
-                  onClick={() => addToVocabulary('ignored')}
+                  onClick={() => addToVocabulary('ignore')}
                   disabled={addingToVocabulary}
                   className="flex-1 px-4 py-2 bg-gray-600 hover:bg-gray-700 rounded-lg text-white font-medium transition-colors disabled:bg-gray-500"
                 >
