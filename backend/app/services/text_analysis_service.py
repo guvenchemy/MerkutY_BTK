@@ -1404,3 +1404,116 @@ Maksimum 100 kelime ile yanıt ver."""
             buffer = io.BytesIO()
             buffer.write(f"Metin PDF oluşturma hatası: {str(e)}".encode())
             return buffer.getvalue()
+
+    def extract_web_content(self, url: str) -> Dict[str, Any]:
+        """
+        Web sayfasından içerik çıkarır (Medium, Wikipedia, vb.)
+        """
+        try:
+            import requests
+            from bs4 import BeautifulSoup
+            
+            headers = {
+                'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36'
+            }
+            
+            response = requests.get(url, headers=headers, timeout=10)
+            response.raise_for_status()
+            
+            soup = BeautifulSoup(response.content, 'html.parser')
+            
+            # Title çıkar
+            title = ""
+            if soup.title:
+                title = soup.title.string.strip()
+            
+            # İçerik çıkar - farklı siteler için farklı stratejiler
+            content = ""
+            
+            if 'medium.com' in url.lower():
+                # Medium için - sadece ana metin içeriği
+                article_content = soup.find('article') or soup.find('[data-testid="storyContent"]')
+                if article_content:
+                    # Gereksiz elementleri temizle
+                    for unwanted in article_content.find_all([
+                        'h1', 'h2', 'h3',  # Başlıkları kaldır
+                        'figure', 'img',   # Resim ve figürleri kaldır
+                        'figcaption',      # Resim açıklamalarını kaldır
+                        'blockquote',      # Alıntıları kaldır (opsiyonel)
+                        'aside',           # Yan notları kaldır
+                        'nav',             # Navigasyon elementleri
+                        'header', 'footer' # Header/footer
+                    ]):
+                        unwanted.decompose()
+                    
+                    # Sadece p taglarından içerik al
+                    paragraphs = article_content.find_all('p')
+                    content_parts = []
+                    for p in paragraphs:
+                        text = p.get_text().strip()
+                        if text and len(text) > 10:  # Çok kısa parçaları filtrele
+                            # "Figure", "Image", "Photo" gibi ifadeleri temizle
+                            import re
+                            if not re.match(r'^(Figure|Image|Photo|Caption|Source).*', text, re.IGNORECASE):
+                                content_parts.append(text)
+                    
+                    content = '\n\n'.join(content_parts)
+            
+            elif 'wikipedia.org' in url.lower():
+                # Wikipedia için
+                content_div = soup.find('div', {'id': 'mw-content-text'})
+                if content_div:
+                    # Matematiksel formülleri ve LaTeX'i temizle
+                    for math_element in content_div.find_all(['math', 'span'], {'class': ['mwe-math-element', 'mw-math-element']}):
+                        math_element.decompose()
+                    
+                    # Annotation ve referans taglarını temizle
+                    for unwanted in content_div.find_all(['sup', 'sub'], {'class': ['reference', 'noprint']}):
+                        unwanted.decompose()
+                    
+                    # LaTeX syntax'ını temizle
+                    paragraphs = content_div.find_all('p')
+                    content_parts = []
+                    for p in paragraphs:
+                        text = p.get_text().strip()
+                        if text:
+                            # LaTeX formüllerini temizle
+                            import re
+                            text = re.sub(r'\$.*?\$', '[matematiksel formül]', text)  # Inline math
+                            text = re.sub(r'\\\[.*?\\\]', '[matematiksel formül]', text)  # Display math
+                            text = re.sub(r'\\begin\{.*?\}.*?\\end\{.*?\}', '[matematiksel formül]', text, flags=re.DOTALL)
+                            text = re.sub(r'\{\\displaystyle.*?\}', '[matematiksel formül]', text)
+                            content_parts.append(text)
+                    
+                    content = '\n\n'.join(content_parts)
+            
+            else:
+                # Genel strateji - p tagları
+                paragraphs = soup.find_all('p')
+                content = '\n\n'.join([p.get_text().strip() for p in paragraphs if p.get_text().strip()])
+            
+            # Eğer içerik çok kısaysa, div'lerden de çıkarmaya çalış
+            if len(content) < 100:
+                divs = soup.find_all('div')
+                for div in divs:
+                    div_text = div.get_text().strip()
+                    if len(div_text) > 100:
+                        content = div_text
+                        break
+            
+            return {
+                'success': True,
+                'data': {
+                    'title': title,
+                    'content': content,
+                    'url': url,
+                    'word_count': len(content.split()) if content else 0
+                }
+            }
+            
+        except Exception as e:
+            return {
+                'success': False,
+                'error': str(e),
+                'url': url
+            }
