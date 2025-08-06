@@ -1,7 +1,7 @@
 # Nexus - AI-Powered Language Learning Platform
 
 > **Not:** Bu proje PostgreSQL veritabanı kullanır, Google Gemini AI API entegrasyonu içerir ve çoklu içerik tiplerini (YouTube, Medium, Wikipedia) destekler.
-
+**Not:** Önce Nexus.pdf ve Sekmeler'i okuyunuz
 ## 🚀 Hızlı Kurulum (Arkadaşlar İçin)
 
 ### Ön Gereksinimler
