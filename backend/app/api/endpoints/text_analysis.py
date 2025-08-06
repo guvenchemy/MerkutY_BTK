@@ -100,7 +100,7 @@ async def analyze_text(
         # Gramer kalıplarını initialize et
         GrammarService.initialize_grammar_patterns(db)
         
-        # Metin analizi yap (i+1 adaptation dahil)
+        # Metin analizi yap (current level adaptation dahil)
         analysis_result = text_service.analyze_text(
             request.text, 
             include_adaptation=request.include_adaptation,
@@ -180,7 +180,7 @@ async def analyze_youtube_transcript(
         if len(transcript_text.strip()) < 50:
             raise HTTPException(status_code=400, detail="Transcript too short for meaningful analysis")
         
-        # Transkripti analiz et (i+1 adaptation dahil)
+        # Transkripti analiz et (current level adaptation dahil)
         analysis_result = text_service.analyze_text(transcript_text, include_adaptation=request.include_adaptation)
         
         # Video bilgilerini ekle

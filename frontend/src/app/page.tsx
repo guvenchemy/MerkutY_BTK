@@ -822,7 +822,7 @@ export default function Home() {
         <header className="text-center mb-8 px-8">
           <h1 className="text-4xl md:text-5xl font-extrabold text-teal-400">Nexus</h1>
           <p className="text-lg text-gray-400 mt-2">
-            AI-Powered Language Learning with i+1 Theory
+            AI-Powered Language Learning with Smart Content Adaptation
           </p>
           
           {/* Login/Logout Button */}
@@ -929,7 +929,7 @@ export default function Home() {
                           🎯 {userStats.level}
                         </span>
                         <span className="bg-green-600 px-3 py-1 rounded-full">
-                          🧠 i+1 Ready: {userStats.krashen_readiness.can_handle_i_plus_1 ? '✅' : '❌'}
+                          🧠 Content Ready: {userStats.krashen_readiness.can_handle_i_plus_1 ? '✅' : '❌'}
                         </span>
                       </div>
                       
@@ -981,8 +981,8 @@ export default function Home() {
                       <input
                         className="appearance-none bg-transparent border-none w-full text-gray-200 placeholder-gray-500 mr-3 py-2 px-4 leading-tight focus:outline-none"
                         type="text"
-                        placeholder="Enter a YouTube URL for i+1 adaptation..."
-                        aria-label="YouTube URL"
+                        placeholder="Desteklenen linkler: YouTube, Medium, Wikipedia..."
+                        aria-label="Content URL"
                         value={url}
                         onChange={(e) => setUrl(e.target.value)}
                       />
@@ -991,7 +991,7 @@ export default function Home() {
                         type="submit"
                         disabled={isLoading}
                       >
-                        {isLoading ? '🔄 Processing...' : '🎯 Adapt to i+1'}
+                        {isLoading ? '🔄 Processing...' : '🎯 Analyze & Adapt'}
                       </button>
                     </div>
                   </form>
@@ -1049,7 +1049,7 @@ export default function Home() {
                               <div>
                                 <div className="text-4xl mb-4">📝</div>
                                 <div className="text-lg font-medium mb-2">Metninizin analiz edilmesi için</div>
-                                <div className="text-sm">yandan link girin</div>
+                                <div className="text-sm">üstten desteklenen bir link girin</div>
                               </div>
                             </div>
                           )}
@@ -1096,7 +1096,7 @@ export default function Home() {
                             <div>
                               <div className="text-4xl mb-4">🎯</div>
                               <div className="text-lg font-medium mb-2">Metninizin analiz edilmesi için</div>
-                              <div className="text-sm">yandan link girin</div>
+                              <div className="text-sm">üstten desteklenen bir link girin</div>
                             </div>
                           </div>
                         )}

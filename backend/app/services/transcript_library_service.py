@@ -63,6 +63,9 @@ class TranscriptLibraryService:
             # Get video info
             video_info = self.youtube_service.get_video_info(video_id)
             
+            # CEFR Level Detection with AI
+            cefr_result = self.ai_service.detect_cefr_level(original_text)
+            
             # Save to library (only original text)
             new_transcript = ProcessedTranscript(
                 video_id=video_id,
@@ -77,7 +80,12 @@ class TranscriptLibraryService:
                 adapted_word_count=0,  # Will be calculated on demand
                 added_by_user_id=user.id,
                 added_by_username=username,
-                view_count=1
+                view_count=1,
+                # CEFR Level fields
+                cefr_level=cefr_result.get("cefr_level", "B1"),
+                level_confidence=cefr_result.get("confidence", 50),
+                level_analysis=cefr_result.get("analysis", "AI analysis completed"),
+                level_analyzed_at=db.execute("SELECT NOW()").scalar()
             )
             
             db.add(new_transcript)
@@ -122,7 +130,12 @@ class TranscriptLibraryService:
                     "adapted_word_count": t.adapted_word_count,
                     "view_count": t.view_count,
                     "added_by": t.added_by_username,
-                    "created_at": t.created_at.isoformat() if t.created_at else None
+                    "created_at": t.created_at.isoformat() if t.created_at else None,
+                    # CEFR Level fields (NEW)
+                    "cefr_level": t.cefr_level,
+                    "level_confidence": t.level_confidence,
+                    "level_analysis": t.level_analysis,
+                    "level_analyzed_at": t.level_analyzed_at.isoformat() if t.level_analyzed_at else None
                 }
                 for t in transcripts
             ]

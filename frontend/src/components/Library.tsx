@@ -18,9 +18,12 @@ interface Transcript {
   view_count: number;
   added_by: string;
   created_at?: string;
-  level?: string; // AI tarafından analiz edilecek
-  category?: string; // AI tarafından belirlenecek
   content_type?: 'youtube' | 'web'; // İçerik türü
+  // CEFR Level fields (NEW)
+  cefr_level?: string; // A1, A2, B1, B2, C1, C2
+  level_confidence?: number; // 0-100%
+  level_analysis?: string; // AI analysis details
+  level_analyzed_at?: string; // When level was determined
 }
 
 // AI ile text level analizi yapan fonksiyon
@@ -136,7 +139,13 @@ const Library = ({ currentUser, userLevel }: LibraryProps) => {
   const [transcripts, setTranscripts] = useState<Transcript[]>([]);
   const [selectedTranscript, setSelectedTranscript] = useState<Transcript | null>(null);
   const [adaptedText, setAdaptedText] = useState('');
-  const [filter, setFilter] = useState({ channel: '', keyword: '', minWords: '', maxWords: '' });
+  const [filter, setFilter] = useState({ 
+    channel: '', 
+    keyword: '', 
+    minWords: '', 
+    maxWords: '',
+    cefrLevel: '' // CEFR level filter
+  });
   const [page, setPage] = useState(1);
   const [loading, setLoading] = useState(true);
   const [adaptationLoading, setAdaptationLoading] = useState(false);
@@ -203,7 +212,7 @@ const Library = ({ currentUser, userLevel }: LibraryProps) => {
       const transcriptResponse = await fetch('http://localhost:8000/api/library/transcripts?limit=50&offset=0');
       
       // Web content'leri getir
-      const webContentResponse = await fetch('http://localhost:8000/api/web-content?limit=50&offset=0');
+      const webContentResponse = await fetch('http://localhost:8000/api/library/web-content?limit=50&offset=0');
       
       let allTranscripts: any[] = [];
       
@@ -211,39 +220,31 @@ const Library = ({ currentUser, userLevel }: LibraryProps) => {
       if (transcriptResponse.ok) {
         const transcriptData = await transcriptResponse.json();
         if (transcriptData.success && transcriptData.data) {
-          // Her transcript için AI level analizi yap
-          const transcriptsWithLevels = await Promise.all(
-            transcriptData.data.map(async (transcript: any) => {
-              let level = 'A1';
-              let category = 'General';
-              
-              // Eğer transcript'te text varsa AI analizi yap
-              if (transcript.original_text) {
-                const analysis = await analyzeTextLevel(transcript.original_text);
-                level = analysis.level;
-                category = analysis.category;
-              }
-              
-              return {
-                id: transcript.id,
-                video_id: transcript.video_id,
-                video_title: transcript.video_title || 'Untitled Video',
-                channel_name: transcript.channel_name || 'Unknown Channel',
-                duration: transcript.duration,
-                original_text: transcript.original_text,
-                adapted_text: transcript.adapted_text,
-                language: transcript.language || 'en',
-                word_count: transcript.word_count || 0,
-                adapted_word_count: transcript.adapted_word_count,
-                view_count: transcript.view_count || 0,
-                added_by: transcript.added_by || 'Unknown',
-                created_at: transcript.created_at,
-                level: level,
-                category: category,
-                content_type: 'youtube'
-              };
-            })
-          );
+          // Backend'den gelen CEFR level verilerini kullan
+          const transcriptsWithLevels = transcriptData.data.map((transcript: any) => {
+            return {
+              id: transcript.id,
+              video_id: transcript.video_id,
+              video_title: transcript.video_title || 'Untitled Video',
+              channel_name: transcript.channel_name || 'Unknown Channel',
+              duration: transcript.duration,
+              original_text: transcript.original_text,
+              adapted_text: transcript.adapted_text,
+              language: transcript.language || 'en',
+              word_count: transcript.word_count || 0,
+              adapted_word_count: transcript.adapted_word_count,
+              view_count: transcript.view_count || 0,
+              added_by: transcript.added_by || 'Unknown',
+              created_at: transcript.created_at,
+              content_type: 'youtube' as const,
+              // Backend'den gelen CEFR level verileri (NEW)
+              cefr_level: transcript.cefr_level,
+              level_confidence: transcript.level_confidence,
+              level_analysis: transcript.level_analysis,
+              level_analyzed_at: transcript.level_analyzed_at
+            };
+          });
+          
           allTranscripts = [...allTranscripts, ...transcriptsWithLevels];
         }
       }
@@ -254,7 +255,8 @@ const Library = ({ currentUser, userLevel }: LibraryProps) => {
         if (webData.success && webData.data) {
           const webContentsWithLevels = await Promise.all(
             webData.data.map(async (content: any) => {
-              let level = 'A1';
+              // Backend'den gelen CEFR verilerini kullan
+              let level = content.cefr_level || 'N/A';
               let category = 'Web Article';
               
               return {
@@ -273,7 +275,12 @@ const Library = ({ currentUser, userLevel }: LibraryProps) => {
                 created_at: content.created_at,
                 level: level,
                 category: category,
-                content_type: 'web'
+                content_type: 'web',
+                // CEFR data from backend
+                cefr_level: content.cefr_level,
+                level_confidence: content.level_confidence,
+                level_analysis: content.level_analysis,
+                level_analyzed_at: content.level_analyzed_at
               };
             })
           );
@@ -296,13 +303,45 @@ const Library = ({ currentUser, userLevel }: LibraryProps) => {
     }
   };
 
+  // AI ile mevcut transcript'lerin seviyelerini analiz et
+  const analyzeLevels = async () => {
+    try {
+      setLoading(true);
+      const response = await fetch('http://localhost:8000/api/library/analyze-levels', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+        },
+      });
+
+      if (response.ok) {
+        const data = await response.json();
+        if (data.success) {
+          alert(`✅ ${data.analyzed_count} transcript analiz edildi!`);
+          // Refresh transcript list to show updated levels
+          await fetchTranscripts();
+        } else {
+          alert(`❌ Analiz hatası: ${data.error}`);
+        }
+      } else {
+        alert('❌ Sunucu hatası occurred during analysis');
+      }
+    } catch (error) {
+      console.error('Error analyzing levels:', error);
+      alert('❌ Analiz sırasında bir hata oluştu');
+    } finally {
+      setLoading(false);
+    }
+  };
+
   // Filtreleme
   const filteredTranscripts = transcripts.filter(t => {
     const channelMatch = filter.channel ? t.channel_name.toLowerCase().includes(filter.channel.toLowerCase()) : true;
     const keywordMatch = filter.keyword ? t.video_title.toLowerCase().includes(filter.keyword.toLowerCase()) : true;
     const minMatch = filter.minWords ? t.word_count >= parseInt(filter.minWords) : true;
     const maxMatch = filter.maxWords ? t.word_count <= parseInt(filter.maxWords) : true;
-    return channelMatch && keywordMatch && minMatch && maxMatch;
+    const cefrMatch = filter.cefrLevel ? t.cefr_level === filter.cefrLevel : true;
+    return channelMatch && keywordMatch && minMatch && maxMatch && cefrMatch;
   });
 
   // Sayfalama
@@ -427,6 +466,42 @@ const Library = ({ currentUser, userLevel }: LibraryProps) => {
         {/* Filtreler */}
         <div className="mb-6">
           <h3 className="text-lg font-bold text-teal-400 mb-4">🔍 Filtreler</h3>
+          
+          {/* Kullanıcı Seviyesi Gösterimi */}
+          <div className="mb-4 p-3 rounded-lg bg-gray-700 border border-gray-600">
+            <div className="flex items-center justify-between">
+              <span className="text-sm text-gray-300">Sizin Seviyeniz:</span>
+              <span 
+                className="text-sm px-3 py-1 rounded-full font-bold"
+                style={{ 
+                  backgroundColor: userLevel === 'A1' ? '#10b981' : 
+                                  userLevel === 'A2' ? '#3b82f6' : 
+                                  userLevel === 'B1' ? '#f59e0b' : 
+                                  userLevel === 'B2' ? '#ef4444' : 
+                                  userLevel === 'C1' ? '#8b5cf6' : '#ec4899',
+                  color: 'white'
+                }}
+              >
+                {userLevel || 'N/A'}
+              </span>
+            </div>
+          </div>
+
+          {/* CEFR Level Filtresi */}
+          <select
+            className="w-full mb-3 p-3 rounded-lg border border-gray-600 bg-gray-700 text-white focus:outline-none focus:border-teal-400"
+            value={filter.cefrLevel}
+            onChange={e => setFilter(f => ({ ...f, cefrLevel: e.target.value }))}
+          >
+            <option value="">Tüm seviyeler</option>
+            <option value="A1">A1 - Başlangıç</option>
+            <option value="A2">A2 - Temel</option>
+            <option value="B1">B1 - Orta Alt</option>
+            <option value="B2">B2 - Orta Üst</option>
+            <option value="C1">C1 - İleri</option>
+            <option value="C2">C2 - Üst Düzey</option>
+          </select>
+
           <input
             type="text"
             placeholder="Kanal adı..."
@@ -457,6 +532,15 @@ const Library = ({ currentUser, userLevel }: LibraryProps) => {
               onChange={e => setFilter(f => ({ ...f, maxWords: e.target.value }))}
             />
           </div>
+
+          {/* AI Level Analysis Button */}
+          <button
+            onClick={analyzeLevels}
+            className="w-full mt-3 p-3 rounded-lg bg-teal-600 hover:bg-teal-700 text-white font-semibold transition-colors duration-200 flex items-center justify-center gap-2"
+            disabled={loading}
+          >
+            🤖 AI ile Seviye Analizi Yap
+          </button>
         </div>
 
         {/* Transcript Listesi */}
@@ -484,19 +568,21 @@ const Library = ({ currentUser, userLevel }: LibraryProps) => {
                   <span 
                     className="text-xs px-2 py-1 rounded-full font-bold"
                     style={{ 
-                      backgroundColor: t.level === 'A1' ? '#10b981' : 
-                                      t.level === 'A2' ? '#3b82f6' : 
-                                      t.level === 'B1' ? '#f59e0b' : 
-                                      t.level === 'B2' ? '#ef4444' : 
-                                      t.level === 'C1' ? '#8b5cf6' : '#ec4899',
+                      backgroundColor: t.cefr_level === 'A1' ? '#10b981' : 
+                                      t.cefr_level === 'A2' ? '#3b82f6' : 
+                                      t.cefr_level === 'B1' ? '#f59e0b' : 
+                                      t.cefr_level === 'B2' ? '#ef4444' : 
+                                      t.cefr_level === 'C1' ? '#8b5cf6' : '#ec4899',
                       color: 'white'
                     }}
                   >
-                    {t.level}
+                    {t.cefr_level || 'N/A'}
                   </span>
-                  <span className="text-xs px-2 py-1 rounded-full font-bold bg-gray-600 text-white">
-                    {t.category}
-                  </span>
+                  {t.level_confidence && (
+                    <span className="text-xs px-2 py-1 rounded-full font-bold bg-gray-600 text-white">
+                      {t.level_confidence}% confident
+                    </span>
+                  )}
                 </div>
                 <h4 className="font-semibold text-white mb-1 line-clamp-2">{t.video_title}</h4>
                 <div className="text-xs text-gray-300 mb-2">

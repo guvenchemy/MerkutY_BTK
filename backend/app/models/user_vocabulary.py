@@ -71,6 +71,12 @@ class ProcessedTranscript(Base):
     word_count = Column(Integer, default=0)
     adapted_word_count = Column(Integer, default=0)
     
+    # CEFR Level Analysis (NEW)
+    cefr_level = Column(String(5))  # A1, A2, B1, B2, C1, C2
+    level_confidence = Column(Integer)  # 0-100%
+    level_analysis = Column(Text)  # AI analysis details
+    level_analyzed_at = Column(DateTime(timezone=True))  # When level was determined
+    
     # User who first added this transcript
     added_by_user_id = Column(Integer, ForeignKey("users.id"), nullable=True)
     added_by_username = Column(String(50), nullable=True)

@@ -13,6 +13,12 @@ class UrlContent(Base):
     source_type = Column(String(50))  # 'wikipedia', 'medium', 'youtube'
     video_id = Column(String(20))  # YouTube için
     created_at = Column(DateTime(timezone=True), server_default=func.now())
+    
+    # CEFR Level Analysis (NEW)
+    cefr_level = Column(String(5))  # A1, A2, B1, B2, C1, C2
+    level_confidence = Column(Integer)  # 0-100%
+    level_analysis = Column(Text)  # AI analysis details
+    level_analyzed_at = Column(DateTime(timezone=True))  # When level was determined
 
 class UnknownWord(Base):
     __tablename__ = "unknown_words"

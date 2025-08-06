@@ -106,7 +106,7 @@ async def adapt_transcript_for_user(
 ):
     """
     Create smart AI adaptation for specific user's level using their vocabulary and grammar knowledge.
-    Implements i+1 methodology with 90% comprehensible + 10% challenging content.
+    Adapts content to user's current comprehension level for optimal learning.
     """
     try:
         # Get original transcript
@@ -119,7 +119,7 @@ async def adapt_transcript_for_user(
         from app.services.ai_text_adaptation_service import AITextAdaptationService
         ai_service = AITextAdaptationService()
         
-        # Use the requested unknown percentage for optimal i+1 learning
+        # Use the requested unknown percentage for optimal learning
         adaptation_result = ai_service.adapt_text_with_ai(
             text=transcript["original_text"], 
             username=request.username,
@@ -141,8 +141,8 @@ async def adapt_transcript_for_user(
                 "adapted_word_count": len(adapted_text.split()),
                 "adaptation_info": adaptation_result.get("adaptation_info", {}),
                 "user_level": adaptation_result.get("user_level", "A1"),
-                "adaptation_method": adaptation_result.get("adaptation_method", "Smart AI i+1"),
-                "comprehension_target": "90% known + 10% challenging words"
+                "adaptation_method": adaptation_result.get("adaptation_method", "Smart AI Current Level"),
+                "comprehension_target": "Adapted to user's current level"
             }
         }
         
@@ -181,7 +181,7 @@ async def adapt_transcript_by_video_id(
         from app.services.ai_text_adaptation_service import AITextAdaptationService
         ai_service = AITextAdaptationService()
         
-        # Use the requested unknown percentage for optimal i+1 learning
+        # Use the requested unknown percentage for optimal learning
         adaptation_result = ai_service.adapt_text_with_ai(
             text=transcript["original_text"], 
             username=request.username,
@@ -203,8 +203,8 @@ async def adapt_transcript_by_video_id(
                 "adapted_word_count": len(adapted_text.split()),
                 "adaptation_info": adaptation_result.get("adaptation_info", {}),
                 "user_level": adaptation_result.get("user_level", "A1"),
-                "adaptation_method": adaptation_result.get("adaptation_method", "Smart AI i+1"),
-                "comprehension_target": "90% known + 10% challenging words"
+                "adaptation_method": adaptation_result.get("adaptation_method", "Smart AI Current Level"),
+                "comprehension_target": "Adapted to user's current level"
             }
         }
         
@@ -341,7 +341,12 @@ async def get_web_content(
                 "created_at": content.created_at.isoformat() if content.created_at else None,
                 "video_id": None,  # For compatibility with transcript interface
                 "original_text": content.content,
-                "adapted_text": None  # Web content doesn't have adapted version in UrlContent
+                "adapted_text": None,  # Web content doesn't have adapted version in UrlContent
+                # CEFR level data
+                "cefr_level": content.cefr_level,
+                "level_confidence": content.level_confidence,
+                "level_analysis": content.level_analysis,
+                "level_analyzed_at": content.level_analyzed_at.isoformat() if content.level_analyzed_at else None
             })
         
         return {
@@ -548,4 +553,90 @@ async def get_or_create_web_content(
         
     except Exception as e:
         print(f"❌ Web content error: {str(e)}")
-        return {"success": False, "error": f"Failed to get web content: {str(e)}"} 
+        return {"success": False, "error": f"Failed to get web content: {str(e)}"}
+
+@router.post("/library/analyze-levels")
+async def analyze_transcript_levels(
+    library_service: TranscriptLibraryService = Depends(get_library_service),
+    db: Session = Depends(get_db)
+):
+    """
+    Analyze CEFR levels for all transcripts and web content that don't have level data.
+    """
+    try:
+        from app.models.user_vocabulary import ProcessedTranscript
+        from app.models.content_models import UrlContent
+        from app.services.ai_text_adaptation_service import AITextAdaptationService
+        
+        # Get transcripts without CEFR level data
+        transcripts = db.query(ProcessedTranscript).filter(
+            ProcessedTranscript.cefr_level == None
+        ).all()
+        
+        # Get web content without CEFR level data
+        web_contents = db.query(UrlContent).filter(
+            UrlContent.cefr_level == None
+        ).all()
+        
+        total_items = len(transcripts) + len(web_contents)
+        
+        if total_items == 0:
+            return {
+                "success": True,
+                "message": "All content already has CEFR level data",
+                "analyzed_count": 0
+            }
+        
+        ai_service = AITextAdaptationService()
+        analyzed_count = 0
+        
+        # Analyze transcripts
+        for transcript in transcripts:
+            try:
+                # Analyze CEFR level
+                cefr_result = ai_service.detect_cefr_level(transcript.original_text)
+                
+                # Update transcript with CEFR data
+                transcript.cefr_level = cefr_result.get("cefr_level", "B1")
+                transcript.level_confidence = cefr_result.get("confidence", 50)
+                transcript.level_analysis = cefr_result.get("analysis", "AI analysis completed")
+                transcript.level_analyzed_at = func.now()
+                
+                analyzed_count += 1
+                
+            except Exception as e:
+                logger.error(f"Error analyzing transcript {transcript.id}: {e}")
+                continue
+        
+        # Analyze web content
+        for content in web_contents:
+            try:
+                # Analyze CEFR level for web content
+                cefr_result = ai_service.detect_cefr_level(content.content)
+                
+                # Update web content with CEFR data
+                content.cefr_level = cefr_result.get("cefr_level", "B1")
+                content.level_confidence = cefr_result.get("confidence", 50)
+                content.level_analysis = cefr_result.get("analysis", "AI analysis completed")
+                content.level_analyzed_at = func.now()
+                
+                analyzed_count += 1
+                
+            except Exception as e:
+                logger.error(f"Error analyzing web content {content.id}: {e}")
+                continue
+        
+        db.commit()
+        
+        return {
+            "success": True,
+            "message": f"Successfully analyzed {analyzed_count} items (transcripts + web content)",
+            "analyzed_count": analyzed_count,
+            "total_transcripts": len(transcripts),
+            "total_web_content": len(web_contents),
+            "total_items": total_items
+        }
+        
+    except Exception as e:
+        logger.error(f"Error in analyze_transcript_levels: {e}")
+        return {"success": False, "error": str(e)} 

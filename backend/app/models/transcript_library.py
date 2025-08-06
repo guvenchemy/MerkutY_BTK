@@ -22,6 +22,12 @@ class TranscriptLibrary(Base):
     transcript_length = Column(Integer)
     adapted_length = Column(Integer)
     
+    # CEFR Level Analysis (NEW)
+    cefr_level = Column(String(5))  # A1, A2, B1, B2, C1, C2
+    level_confidence = Column(Integer)  # 0-100%
+    level_analysis = Column(Text)  # AI analysis details
+    level_analyzed_at = Column(DateTime(timezone=True))  # When level was determined
+    
     # User who first added this transcript
     added_by_user_id = Column(Integer, ForeignKey("users.id"))
     added_by_username = Column(String(50))

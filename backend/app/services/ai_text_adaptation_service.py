@@ -15,11 +15,11 @@ class AITextAdaptationService:
     """
     AI-Powered Text Adaptation using Google Gemini
     
-    Implements Krashen's i+1 Hypothesis with intelligent text rewriting:
-    - Maintains 90% known words + 10% challenging words
+    Implements Current Level Approach with intelligent text rewriting:
+    - Maintains 95-100% known words for full comprehension
     - Uses user's grammar knowledge for appropriate complexity
     - Preserves meaning and context
-    - Gradual vocabulary and grammar introduction for optimal learning
+    - Comfortable learning environment at user's current level
     """
     
     def __init__(self):
@@ -148,63 +148,66 @@ class AITextAdaptationService:
             logging.error(f"Error getting user grammar knowledge: {e}")
             return {"known_patterns": [], "user_level": "A1", "avoid_patterns": []}
     
-    def create_adaptation_prompt(self, text: str, known_words: Set[str], grammar_info: Dict, target_unknown_percentage: float = 10.0) -> str:
+    def create_adaptation_prompt(self, text: str, known_words: Set[str], grammar_info: Dict, target_unknown_percentage: float = 5.0) -> str:
         """
-        Create a sophisticated prompt for Gemini to adapt text according to i+1 theory.
-        Now includes user's grammar knowledge for more precise adaptation.
+        Create a sophisticated prompt for Gemini to adapt text to user's current level (i level).
+        Focuses on making text fully comprehensible using only known vocabulary and grammar.
         """
         known_words_sample = list(known_words)[:100] if len(known_words) > 100 else list(known_words)
         known_patterns = grammar_info.get("known_patterns", [])
         user_level = grammar_info.get("user_level", "A1")
         avoid_patterns = grammar_info.get("avoid_patterns", [])
         
-        prompt = f"""You are an expert English teacher implementing Stephen Krashen's i+1 hypothesis for optimal language acquisition.
+        prompt = f"""You are an expert English teacher adapting text to the student's CURRENT LEVEL for maximum comprehension.
 
-CRITICAL MISSION: Adapt this text to be EXACTLY 90% comprehensible and 10% challenging for this specific student.
+CRITICAL MISSION: Adapt this text to be FULLY COMPREHENSIBLE (95-100%) for this specific student using only their known vocabulary and grammar.
 
 STUDENT PROFILE:
 - Current Level: {user_level}
 - Known Words: {', '.join(known_words_sample)}
 - Known Grammar: {', '.join(known_patterns[:20])}
-- AVOID these advanced grammar patterns: {', '.join(avoid_patterns[:15])}
+- STRICTLY AVOID these patterns: {', '.join(avoid_patterns[:15])}
 
 ORIGINAL TEXT:
 {text}
 
-ADAPTATION RULES:
-1. **VOCABULARY TARGET**: Use 90% words from student's known vocabulary + exactly 10% new learning words
-2. **GRAMMAR TARGET**: Use only grammar patterns the student knows + maximum 1-2 new patterns from their level
+ADAPTATION RULES (CURRENT LEVEL - i APPROACH):
+1. **VOCABULARY TARGET**: Use 95-100% words from student's known vocabulary ONLY
+2. **GRAMMAR TARGET**: Use ONLY grammar patterns the student already knows
 3. **PRESERVE MEANING**: Keep the EXACT same information and message
-4. **SENTENCE LENGTH**: Keep sentences short and clear (maximum 15 words per sentence)
-5. **AVOID COMPLEXITY**: Do NOT use grammar patterns from the avoid list
+4. **SENTENCE LENGTH**: Keep sentences short and clear (maximum 12 words per sentence)
+5. **STRICT AVOIDANCE**: NEVER use unknown grammar patterns or vocabulary
 
 VOCABULARY STRATEGY:
-- If student knows "big", use "big" instead of "huge", "enormous", "massive"
-- If student knows "good", use "good" instead of "excellent", "wonderful", "fantastic"
-- If student knows "make", use "make" instead of "create", "construct", "produce"
-- Choose the simplest synonym from their vocabulary
+- ONLY use words from student's known vocabulary list
+- If a concept requires unknown words, explain with multiple known words
+- Replace ALL unknown words with simpler alternatives from their vocabulary
+- Example: "enormous" → "very big" (if student knows "very" and "big")
 
 GRAMMAR STRATEGY:
-- If student knows "present_simple" but not "present_perfect": Use "I work" instead of "I have worked"
-- If student knows "past_simple" but not "past_continuous": Use "I walked" instead of "I was walking"
-- If student knows "basic_questions" but not "question_formation": Use "What is this?" instead of "What do you think this could be?"
+- ONLY use grammar patterns from the known list
+- If student knows only "present_simple": Use only "I work", "He works", etc.
+- If student knows only "past_simple": Use only "I worked", "He went", etc.
+- NO complex grammar - keep it at their current level
 
-FORBIDDEN PATTERNS (DO NOT USE):
-{', '.join(avoid_patterns)}
+STRICTLY FORBIDDEN:
+- Unknown vocabulary (not in their known words list)
+- Unknown grammar patterns (from avoid list)
+- Complex sentence structures beyond their level
 
-SENTENCE EXAMPLES:
+CURRENT LEVEL EXAMPLES:
 Complex: "The sophisticated algorithm analyzes comprehensive data sets to determine optimal solutions."
-→ Simple: "The smart computer program looks at all information to find the best answers."
+→ Current Level: "The smart computer program looks at information to find good answers."
 
 Complex: "Having completed the arduous journey, they finally reached their destination."
-→ Simple: "They finished the hard trip. They got to their place."
+→ Current Level: "They finished the hard trip. Now they are at their place."
 
-TARGET OUTPUT:
-- 90% vocabulary comprehension (use known words)
-- 10% vocabulary challenge (introduce 2-3 new words maximum)
-- Grammar appropriate for {user_level} level
-- Same meaning as original
-- Natural English flow
+TARGET OUTPUT FORMAT:
+- Use ONLY vocabulary and grammar from student's current level
+- Write clear, simple sentences (max 12 words each)
+- Maintain original meaning completely
+- Ensure 95-100% comprehensibility for current level
+- Natural English flow within level constraints
 
 IMPORTANT: Write ONLY the adapted English text. No explanations or comments."""
 
@@ -266,18 +269,18 @@ C1-C2: Advanced vocabulary, sophisticated grammar, complex sentence structures
 
         return prompt
     
-    def adapt_text_with_ai(self, text: str, username: str, db: Session, target_unknown_percentage: float = 10.0) -> Dict:
+    def adapt_text_with_ai(self, text: str, username: str, db: Session, target_unknown_percentage: float = 0.0) -> Dict:
         """
-        🎯 CEFR LEVEL-BASED ADAPTATION (Updated System)
+        🎯 CEFR LEVEL-BASED ADAPTATION (Current Level System)
         
         New Strategy:
         1. Detect user's current CEFR level (A1, A2, B1, B2, C1, C2)
         2. Analyze original text's CEFR level
-        3. Rewrite text at user's level + 1 (i+1 principle)
+        3. Rewrite text at user's EXACT level (current level approach)
         
         Examples:
-        - User B2 → Text adapted to C1 level
-        - User A2 → Text adapted to B1 level
+        - User B2 → Text adapted to B2 level (current level)
+        - User A2 → Text adapted to A2 level (current level)
         """
         try:
             # Get user object first
@@ -291,14 +294,8 @@ C1-C2: Advanced vocabulary, sophisticated grammar, complex sentence structures
             # Extract user's current CEFR level
             current_level = user_level_info.get("user_level", {}).get("level", "A1")
             
-            # Calculate target level (current + 1)
-            cefr_levels = ["A1", "A2", "B1", "B2", "C1", "C2"]
-            try:
-                current_index = cefr_levels.index(current_level)
-                target_level = cefr_levels[min(current_index + 1, len(cefr_levels) - 1)]
-            except ValueError:
-                # If level not found, default to A2
-                target_level = "A2"
+            # Use current level (no +1)
+            target_level = current_level
             
             # Create the NEW CEFR-based adaptation prompt
             prompt = self.create_cefr_adaptation_prompt(text, current_level, target_level)
@@ -317,8 +314,8 @@ C1-C2: Advanced vocabulary, sophisticated grammar, complex sentence structures
                 adaptation_info = {
                     "user_current_level": current_level,
                     "target_level": target_level,
-                    "adaptation_strategy": f"CEFR Level-Based: {current_level} → {target_level}",
-                    "method": "i+1 CEFR Progression"
+                    "adaptation_strategy": f"CEFR Level-Based: {current_level} → {target_level} (Current Level)",
+                    "method": "Current Level Adaptation"
                 }
                 
                 return {
@@ -684,3 +681,102 @@ Analyze the text and return the JSON response:"""
             # Hata durumunda sadece orijinal kelimeyi ekle
             logging.warning(f"Error in word variations for '{word}': {e}")
             pass 
+    def detect_cefr_level(self, text: str) -> Dict[str, any]:
+        """
+        🎯 CEFR LEVEL DETECTION using AI
+        
+        Analyzes text and determines CEFR level (A1-C2) with confidence score.
+        Returns detailed analysis for library filtering.
+        """
+        try:
+            prompt = f"""
+🎯 CEFR LEVEL ANALYSIS TASK
+
+Analyze the following English text and determine its CEFR level.
+
+ANALYSIS CRITERIA:
+📚 VOCABULARY COMPLEXITY:
+- A1: Basic everyday words (300-600 words)
+- A2: Common words, simple descriptions (600-1200 words) 
+- B1: More varied vocabulary, some abstract concepts (1200-2500 words)
+- B2: Wide vocabulary range, specialized terms (2500-3250 words)
+- C1: Advanced vocabulary, nuanced expressions (3250-5000 words)
+- C2: Very advanced, sophisticated language (5000+ words)
+
+🔤 GRAMMAR COMPLEXITY:
+- A1: Present simple, basic sentence structures
+- A2: Past simple, future, basic comparatives
+- B1: Present perfect, conditional, complex sentences
+- B2: Passive voice, reported speech, advanced tenses
+- C1: Complex grammar, sophisticated structures
+- C2: Near-native grammar mastery
+
+📝 SENTENCE STRUCTURE:
+- A1-A2: Simple, short sentences
+- B1-B2: Compound and some complex sentences  
+- C1-C2: Complex, sophisticated sentence structures
+
+🎯 TEXT TO ANALYZE:
+"{text[:1000]}..." 
+
+PROVIDE YOUR ANALYSIS IN THIS EXACT JSON FORMAT:
+{{
+    "cefr_level": "B1",
+    "confidence": 85,
+    "analysis": "This text demonstrates B1 level complexity with present perfect tense, conditional structures, and vocabulary around 1500 words. Sentence structures are moderately complex with some subordinate clauses.",
+    "vocabulary_level": "B1",
+    "grammar_level": "B1", 
+    "sentence_complexity": "B1",
+    "key_indicators": [
+        "Present perfect tense usage",
+        "Conditional sentences", 
+        "Moderate vocabulary complexity",
+        "Some complex sentence structures"
+    ],
+    "word_count_estimate": 1500
+}}
+
+RESPOND ONLY WITH THE JSON, NO OTHER TEXT."""
+
+            response = self.client.generate_content(prompt)
+            result_text = response.text.strip()
+            
+            # Clean up response
+            if result_text.startswith('```json'):
+                result_text = result_text[7:]
+            if result_text.endswith('```'):
+                result_text = result_text[:-3]
+            
+            # Parse JSON response
+            try:
+                analysis_result = json.loads(result_text)
+                return {
+                    "success": True,
+                    "cefr_level": analysis_result.get("cefr_level", "B1"),
+                    "confidence": analysis_result.get("confidence", 50),
+                    "analysis": analysis_result.get("analysis", "AI analysis completed"),
+                    "vocabulary_level": analysis_result.get("vocabulary_level", "B1"),
+                    "grammar_level": analysis_result.get("grammar_level", "B1"),
+                    "sentence_complexity": analysis_result.get("sentence_complexity", "B1"),
+                    "key_indicators": analysis_result.get("key_indicators", []),
+                    "word_count_estimate": analysis_result.get("word_count_estimate", len(text.split()))
+                }
+            except json.JSONDecodeError as e:
+                logger.error(f"JSON parsing error in CEFR detection: {e}")
+                return {
+                    "success": False,
+                    "error": "Failed to parse AI response",
+                    "cefr_level": "B1",
+                    "confidence": 50,
+                    "analysis": "Default analysis due to parsing error"
+                }
+                
+        except Exception as e:
+            logger.error(f"Error in CEFR level detection: {e}")
+            return {
+                "success": False,
+                "error": str(e),
+                "cefr_level": "B1", 
+                "confidence": 50,
+                "analysis": "Error occurred during analysis"
+            }
