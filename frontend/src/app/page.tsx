@@ -551,8 +551,23 @@ export default function Home() {
       
       setOriginalText(transcriptData.original_text);
       
-      // Show success message
-      setError('✅ YouTube video başarıyla işlendi!');
+      // Set adapted text if available
+      if (transcriptData.adapted_text) {
+        setAdaptedText(transcriptData.adapted_text);
+      } else {
+        setAdaptedText('AI adaptation not available for this video.');
+      }
+      
+      // Show success message with duplicate info
+      let successMessage = '✅ YouTube video başarıyla işlendi!';
+      if (transcriptData.from_library) {
+        if (transcriptData.from_own_library) {
+          successMessage = '✅ Zaten kütüphanende olan içerik kullanıldı!';
+        } else if (transcriptData.from_discover) {
+          successMessage = '✅ Keşfet\'ten bulunan içerik kullanıldı!';
+        }
+      }
+      setError(successMessage);
       
     } catch (err: any) {
       setError(err.message);
@@ -1049,7 +1064,7 @@ export default function Home() {
                               <div>
                                 <div className="text-4xl mb-4">📝</div>
                                 <div className="text-lg font-medium mb-2">Metninizin analiz edilmesi için</div>
-                                <div className="text-sm">üstten desteklenen bir link girin</div>
+                                <div className="text-sm">yandan desteklenen bir link girin</div>
                               </div>
                             </div>
                           )}
@@ -1096,7 +1111,7 @@ export default function Home() {
                             <div>
                               <div className="text-4xl mb-4">🎯</div>
                               <div className="text-lg font-medium mb-2">Metninizin analiz edilmesi için</div>
-                              <div className="text-sm">üstten desteklenen bir link girin</div>
+                              <div className="text-sm">yandan desteklenen bir link girin</div>
                             </div>
                           </div>
                         )}

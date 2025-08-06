@@ -294,8 +294,16 @@ C1-C2: Advanced vocabulary, sophisticated grammar, complex sentence structures
             # Extract user's current CEFR level
             current_level = user_level_info.get("user_level", {}).get("level", "A1")
             
-            # Use current level (no +1)
-            target_level = current_level
+            # Use B1+ level (optimal learning - between current and next level)
+            level_mapping = {
+                "A1": "A1+",  # A1 ile A2 arası
+                "A2": "A2+",  # A2 ile B1 arası
+                "B1": "B1+",  # B1 ile B2 arası
+                "B2": "B2+",  # B2 ile C1 arası
+                "C1": "C1+",  # C1 ile C2 arası
+                "C2": "C2"    # C2'den sonra C2 kalır
+            }
+            target_level = level_mapping.get(current_level, "B1+")
             
             # Create the NEW CEFR-based adaptation prompt
             prompt = self.create_cefr_adaptation_prompt(text, current_level, target_level)
@@ -314,14 +322,14 @@ C1-C2: Advanced vocabulary, sophisticated grammar, complex sentence structures
                 adaptation_info = {
                     "user_current_level": current_level,
                     "target_level": target_level,
-                    "adaptation_strategy": f"CEFR Level-Based: {current_level} → {target_level} (Current Level)",
-                    "method": "Current Level Adaptation"
+                    "adaptation_strategy": f"CEFR Level-Based: {current_level} → {target_level} (B1+ Optimal Learning)",
+                    "method": "B1+ Optimal Adaptation"
                 }
                 
                 return {
                     "original_text": text,
                     "adapted_text": adapted_text,
-                    "adaptation_method": f"CEFR Level Adaptation: {target_level}",
+                    "adaptation_method": f"CEFR Level Adaptation: {current_level} → {target_level}",
                     "adaptation_info": adaptation_info,
                     "user_level": current_level,
                     "target_level": target_level,

@@ -139,7 +139,7 @@ const GrammarPatternCheckbox: React.FC<GrammarPatternCheckboxProps> = ({
 };
 
 // Utility: Flatten backend grammar overview into simple arrays
-const TOTAL_GRAMMAR_PATTERNS = 42; // Total grammar patterns
+const TOTAL_GRAMMAR_PATTERNS = 41; // Total grammar patterns (A1:6 + A2:8 + B1:8 + B2:10 + C1:5 + C2:4)
 const aggregateGrammarOverview = (overviewData: any) => {
   if (!overviewData || !overviewData.overview) {
     return {

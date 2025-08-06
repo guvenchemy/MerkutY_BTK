@@ -125,33 +125,31 @@ async def get_user_learning_stats(username: str) -> Dict:
         
         db.close()
         
-        # Calculate user level based on vocabulary size
-        vocab_size = len(known_words)
-        if vocab_size < 50:
-            level = "Absolute Beginner"
-            level_score = 0
-        elif vocab_size < 200:
+        # Use grammar hierarchy service for proper level calculation
+        from app.services.grammar_hierarchy_service import GrammarHierarchyService
+        grammar_service = GrammarHierarchyService()
+        level_info = grammar_service.calculate_user_level(user.id, db)
+        
+        # Get CEFR level and convert to user-friendly name
+        cefr_level = level_info.get("user_level", {}).get("level", "A1")
+        
+        # Convert CEFR to user-friendly level names
+        if cefr_level in ["A1", "A2"]:
+            level = "Beginner"
+            level_score = 1 if cefr_level == "A1" else 2
+        elif cefr_level in ["B1", "B2"]:
+            level = "Intermediate"
+            level_score = 3 if cefr_level == "B1" else 4
+        elif cefr_level in ["C1", "C2"]:
+            level = "Advanced"
+            level_score = 5 if cefr_level == "C1" else 6
+        else:
             level = "Beginner"
             level_score = 1
-        elif vocab_size < 500:
-            level = "Elementary"
-            level_score = 2
-        elif vocab_size < 1000:
-            level = "Pre-Intermediate"
-            level_score = 3
-        elif vocab_size < 2000:
-            level = "Intermediate"
-            level_score = 4
-        elif vocab_size < 4000:
-            level = "Upper-Intermediate"
-            level_score = 5
-        else:
-            level = "Advanced"
-            level_score = 6
         
         return {
             "username": username,
-            "vocabulary_size": vocab_size,
+            "vocabulary_size": len(known_words),
             "level": level,
             "level_score": level_score,
             "known_words_sample": list(known_words)[:100] if known_words else [],
@@ -162,9 +160,9 @@ async def get_user_learning_stats(username: str) -> Dict:
                 "total_managed": known_count + unknown_count + ignore_count
             },
             "krashen_readiness": {
-                "can_handle_i_plus_1": vocab_size >= 100,
-                "recommended_unknown_percentage": 10.0 if vocab_size >= 200 else 5.0,
-                "next_milestone": 200 if vocab_size < 200 else 500 if vocab_size < 500 else 1000
+                "can_handle_i_plus_1": len(known_words) >= 100,
+                "recommended_unknown_percentage": 10.0 if len(known_words) >= 200 else 5.0,
+                "next_milestone": 200 if len(known_words) < 200 else 500 if len(known_words) < 500 else 1000
             }
         }
         

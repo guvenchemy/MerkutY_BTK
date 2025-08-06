@@ -7,7 +7,7 @@ from app.core.database import get_db
 from app.services.transcript_library_service import TranscriptLibraryService
 from app.models.content_models import UrlContent
 from app.models.user_vocabulary import User
-from app.models.transcript_library import TranscriptLibrary
+
 from app.services.auth_service import get_current_user
 import logging
 
@@ -60,14 +60,16 @@ async def get_or_create_transcript(
 async def get_library_transcripts(
     limit: int = 50,
     offset: int = 0,
+    username: str = None,
     library_service: TranscriptLibraryService = Depends(get_library_service),
     db: Session = Depends(get_db)
 ):
     """
-    Get all transcripts from library with pagination.
+    Get transcripts from library with pagination.
+    If username provided, only return user's transcripts.
     """
     try:
-        transcripts = library_service.get_library_transcripts(db, limit, offset)
+        transcripts = library_service.get_library_transcripts(db, limit, offset, username)
         return {
             "success": True,
             "data": transcripts,
@@ -162,10 +164,10 @@ async def adapt_transcript_by_video_id(
     """
     try:
         # Find transcript by video ID
-        from app.models import TranscriptLibrary
-        transcript_record = db.query(TranscriptLibrary).filter(
-            TranscriptLibrary.video_id == video_id,
-            TranscriptLibrary.is_active == True
+        from app.models.user_vocabulary import ProcessedTranscript
+        transcript_record = db.query(ProcessedTranscript).filter(
+            ProcessedTranscript.video_id == video_id,
+            ProcessedTranscript.is_active == True
         ).first()
         
         if not transcript_record:
@@ -283,20 +285,22 @@ async def get_library_stats(
     try:
         from app.models.user_vocabulary import User
         
-        total_transcripts = db.query(TranscriptLibrary).filter(
-            TranscriptLibrary.is_active == True
+        from app.models.user_vocabulary import ProcessedTranscript
+        
+        total_transcripts = db.query(ProcessedTranscript).filter(
+            ProcessedTranscript.is_active == True
         ).count()
         
-        total_views = db.query(TranscriptLibrary).filter(
-            TranscriptLibrary.is_active == True
+        total_views = db.query(ProcessedTranscript).filter(
+            ProcessedTranscript.is_active == True
         ).with_entities(
-            func.sum(TranscriptLibrary.view_count)
+            func.sum(ProcessedTranscript.view_count)
         ).scalar() or 0
         
-        total_words = db.query(TranscriptLibrary).filter(
-            TranscriptLibrary.is_active == True
+        total_words = db.query(ProcessedTranscript).filter(
+            ProcessedTranscript.is_active == True
         ).with_entities(
-            func.sum(TranscriptLibrary.word_count)
+            func.sum(ProcessedTranscript.word_count)
         ).scalar() or 0
         
         return {
@@ -639,4 +643,221 @@ async def analyze_transcript_levels(
         
     except Exception as e:
         logger.error(f"Error in analyze_transcript_levels: {e}")
-        return {"success": False, "error": str(e)} 
+        return {"success": False, "error": str(e)}
+
+# Keşfet için yeni endpoint'ler
+@router.get("/library/discover")
+async def get_discover_content(
+    limit: int = 50,
+    offset: int = 0,
+    cefr_level: str = "",
+    channel: str = "",
+    keyword: str = "",
+    min_words: int = 0,
+    max_words: int = 0,
+    db: Session = Depends(get_db)
+):
+    """
+    Get all content from discover library (all users' content)
+    """
+    try:
+        from app.models.user_vocabulary import ProcessedTranscript
+        from app.models.content_models import UrlContent
+        
+        # Build query for transcripts
+        transcript_query = db.query(ProcessedTranscript).filter(
+            ProcessedTranscript.is_active == True
+        )
+        
+        # Apply filters
+        if cefr_level:
+            transcript_query = transcript_query.filter(ProcessedTranscript.cefr_level == cefr_level)
+        if channel:
+            transcript_query = transcript_query.filter(ProcessedTranscript.channel_name.ilike(f"%{channel}%"))
+        if keyword:
+            transcript_query = transcript_query.filter(ProcessedTranscript.video_title.ilike(f"%{keyword}%"))
+        if min_words:
+            transcript_query = transcript_query.filter(ProcessedTranscript.word_count >= min_words)
+        if max_words:
+            transcript_query = transcript_query.filter(ProcessedTranscript.word_count <= max_words)
+        
+        # Get transcripts with pagination
+        transcripts = transcript_query.order_by(
+            ProcessedTranscript.view_count.desc()
+        ).offset(offset).limit(limit).all()
+        
+        # Build query for web content
+        web_query = db.query(UrlContent)
+        
+        # Apply same filters to web content
+        if cefr_level:
+            web_query = web_query.filter(UrlContent.cefr_level == cefr_level)
+        if keyword:
+            web_query = web_query.filter(UrlContent.title.ilike(f"%{keyword}%"))
+        if min_words:
+            web_query = web_query.filter(UrlContent.word_count >= min_words)
+        if max_words:
+            web_query = web_query.filter(UrlContent.word_count <= max_words)
+        
+        # Get total counts for pagination
+        total_transcripts = transcript_query.count()
+        total_web_content = web_query.count()
+        total_content = total_transcripts + total_web_content
+        
+        # Get web content with pagination
+        web_contents = web_query.order_by(
+            UrlContent.created_at.desc()
+        ).offset(offset).limit(limit).all()
+        
+        # Combine and format results
+        all_content = []
+        
+        # Add transcripts
+        for t in transcripts:
+            all_content.append({
+                "id": t.id,
+                "video_id": t.video_id,
+                "video_title": t.video_title,
+                "channel_name": t.channel_name,
+                "duration": t.duration,
+                "language": t.language,
+                "word_count": t.word_count,
+                "view_count": t.view_count,
+                "added_by": t.added_by_username,
+                "created_at": t.created_at.isoformat() if t.created_at else None,
+                "content_type": "youtube",
+                "cefr_level": t.cefr_level,
+                "level_confidence": t.level_confidence,
+                "level_analysis": t.level_analysis,
+                "level_analyzed_at": t.level_analyzed_at.isoformat() if t.level_analyzed_at else None
+            })
+        
+        # Add web content
+        for w in web_contents:
+            all_content.append({
+                "id": w.id,
+                "video_id": None,
+                "video_title": w.title,
+                "channel_name": w.url,
+                "duration": None,
+                "language": "en",
+                "word_count": w.word_count,
+                "view_count": 0,
+                "added_by": "User",
+                "created_at": w.created_at.isoformat() if w.created_at else None,
+                "content_type": "web",
+                "cefr_level": w.cefr_level,
+                "level_confidence": w.level_confidence,
+                "level_analysis": w.level_analysis,
+                "level_analyzed_at": w.level_analyzed_at.isoformat() if w.level_analyzed_at else None
+            })
+        
+        # Sort by creation date (newest first)
+        all_content.sort(key=lambda x: x["created_at"] or "", reverse=True)
+        
+        return {
+            "success": True,
+            "data": all_content,
+            "total": total_content,
+            "limit": limit,
+            "offset": offset
+        }
+        
+    except Exception as e:
+        logger.error(f"Error getting discover content: {e}")
+        return {"success": False, "error": str(e)}
+
+@router.post("/library/add-to-my-library")
+async def add_content_to_my_library(
+    request: dict,
+    current_user: User = Depends(get_current_user),
+    db: Session = Depends(get_db)
+):
+    """
+    Add content from discover to user's own library
+    """
+    try:
+        from app.models.user_vocabulary import ProcessedTranscript
+        from app.models.content_models import UrlContent
+        
+        content_id = request.get("content_id")
+        content_type = request.get("content_type", "youtube")
+        
+        if not content_id:
+            return {"success": False, "error": "Content ID is required"}
+        
+        # Get the original content
+        if content_type == "youtube":
+            original_content = db.query(ProcessedTranscript).filter(
+                ProcessedTranscript.id == content_id
+            ).first()
+        else:
+            original_content = db.query(UrlContent).filter(
+                UrlContent.id == content_id
+            ).first()
+        
+        if not original_content:
+            return {"success": False, "error": "Content not found"}
+        
+        # Check if user already has this content
+        if content_type == "youtube":
+            existing = db.query(ProcessedTranscript).filter(
+                ProcessedTranscript.video_id == original_content.video_id,
+                ProcessedTranscript.added_by_user_id == current_user.id
+            ).first()
+        else:
+            existing = db.query(UrlContent).filter(
+                UrlContent.url == original_content.url,
+                UrlContent.added_by_user_id == current_user.id
+            ).first()
+        
+        if existing:
+            return {"success": False, "error": "Bu içerik zaten kütüphanende var"}
+        
+        # Create a copy for the user
+        if content_type == "youtube":
+            new_content = ProcessedTranscript(
+                video_id=original_content.video_id,
+                video_url=original_content.video_url,
+                video_title=original_content.video_title,
+                channel_name=original_content.channel_name,
+                duration=original_content.duration,
+                original_text=original_content.original_text,
+                adapted_text=original_content.adapted_text,
+                language=original_content.language,
+                word_count=original_content.word_count,
+                adapted_word_count=original_content.adapted_word_count,
+                added_by_user_id=current_user.id,
+                added_by_username=current_user.username,
+                view_count=1,
+                cefr_level=original_content.cefr_level,
+                level_confidence=original_content.level_confidence,
+                level_analysis=original_content.level_analysis,
+                level_analyzed_at=original_content.level_analyzed_at
+            )
+        else:
+            new_content = UrlContent(
+                url=original_content.url,
+                title=original_content.title,
+                content=original_content.content,
+                source_type=original_content.source_type,
+                word_count=original_content.word_count,
+                added_by_user_id=current_user.id,
+                cefr_level=original_content.cefr_level,
+                level_confidence=original_content.level_confidence,
+                level_analysis=original_content.level_analysis,
+                level_analyzed_at=original_content.level_analyzed_at
+            )
+        
+        db.add(new_content)
+        db.commit()
+        
+        return {
+            "success": True,
+            "message": "İçerik kütüphanene eklendi",
+            "content_id": new_content.id
+        }
+        
+    except Exception as e:
+        logger.error(f"Error adding content to library: {e}")
+        return {"success": False, "error": str(e)}

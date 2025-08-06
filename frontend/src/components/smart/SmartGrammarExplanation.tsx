@@ -291,6 +291,9 @@ export default function SmartGrammarExplanation({
               ) : Array.isArray(explanation.example_from_text) ? (
                 <div className="space-y-2">
                   {explanation.example_from_text.map((example, idx) => {
+                    // Debug logging
+                    console.log(`🔍 Example ${idx}:`, example, typeof example);
+                    
                     // Safe type checking for different object types
                     if (typeof example === 'string') {
                       return (

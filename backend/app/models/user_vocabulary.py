@@ -19,7 +19,7 @@ class User(Base):
     vocabularies = relationship("UserVocabulary", back_populates="user")
     unknown_words = relationship("UnknownWord", back_populates="user")
     grammar_knowledge = relationship("UserGrammarKnowledge", back_populates="user")
-    added_transcripts = relationship("TranscriptLibrary", foreign_keys="TranscriptLibrary.added_by_user_id")
+
 
 class Vocabulary(Base):
     __tablename__ = "vocabularies"
@@ -56,7 +56,7 @@ class ProcessedTranscript(Base):
     __tablename__ = "processed_transcripts"
     
     id = Column(Integer, primary_key=True, index=True)
-    video_id = Column(String(20), unique=True, index=True, nullable=False)  # YouTube video ID
+    video_id = Column(String(20), index=True, nullable=False)  # YouTube video ID (removed unique constraint)
     video_url = Column(String(500), nullable=True)
     video_title = Column(String(500), nullable=True)
     channel_name = Column(String(200), nullable=True)
@@ -91,6 +91,8 @@ class ProcessedTranscript(Base):
     
     # Relationships
     added_by = relationship("User", foreign_keys=[added_by_user_id])
+
+
 
 # Model for tracking user's grammar pattern knowledge
 class UserGrammarKnowledge(Base):

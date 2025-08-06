@@ -111,7 +111,8 @@ class AITeacherService:
                 r'\bit\s+is\s+(amazing|wonderful|great|fantastic|terrible|awful|beautiful|interesting)\b'
             ],
             "present_continuous": [
-                r'\b(am|is|are)\s+\w+ing\b'  # am/is/are + V-ing
+                r'\b(am|is|are)\s+\w+ing\b',  # am/is/are + V-ing
+                r'\b(I\'m|he\'s|she\'s|it\'s|we\'re|you\'re|they\'re)\s+\w+ing\b'  # contractions + V-ing
             ],
             "past_continuous": [
                 r'\b(was|were)\s+\w+ing\b'  # was/were + V-ing
@@ -128,13 +129,18 @@ class AITeacherService:
                 r'\b(have|has|had)\s+been\s+\w+ed\b',  # have/has/had been + past participle
                 r'\bwill\s+have\s+been\s+\w+ed\b'  # will have been + past participle
             ],
+            "conditionals_type0": [
+                r'\bif\s+\w+\s+\w+.*,\s*\w+\s+\w+\b',  # if + present simple, present simple
+                r'\bif\s+\w+\s+\w+.*\s+\w+\s+\w+\b'  # if + present simple, present simple (no comma)
+            ],
             "conditionals_type1": [
                 r'\bif\s+\w+.*,\s*\w+.*will\b',  # if + present, will + infinitive
                 r'\bif\s+\w+.*will\b'
             ],
             "conditionals_type2": [
-                r'\bif\s+\w+.*would\b',  # if + past, would + infinitive
-                r'\bif\s+.*were.*would\b'
+                r'\bif\s+\w+\s+\w+ed.*would\b',  # if + past simple, would + infinitive
+                r'\bif\s+\w+\s+were.*would\b',  # if + were, would + infinitive
+                r'\bif\s+\w+\s+had.*would\b'  # if + had, would + infinitive
             ],
             "conditionals_type3": [
                 r'\bif\s+.*had\s+\w+ed.*would\s+have\b',  # if + past perfect, would have + participle
@@ -198,25 +204,58 @@ class AITeacherService:
                 r'\bthe\s+\w+est\s+(in|of|among)\b'
             ],
             "past_simple": [
+                r'\b(went|came|saw|did|made|took|gave|got|had|said|told|thought|found|knew|wrote|read|spoke|ate|drank|slept|walked|talked|worked|studied)\b',  # irregular verbs
                 r'\b(was|were)\b',  # be verbs in past
-                r'\b\w+ed\b',  # regular past tense
-                r'\b(went|came|saw|did|made|took|gave|got|had|said|told|thought|found|knew)\b'  # irregular verbs
+                r'\b\w+ed\b'  # regular past tense (but be careful with false positives)
             ],
             "present_simple": [
-                r'\bit\s+is\s+\w+\b',  # it is + adjective/noun (like "it is amazing")
-                r'\b(am|is|are)\s+\w+(?!ing)\b',  # be + not V-ing
+                r'\b(work|works|live|lives|play|plays|eat|eats|speak|speaks|know|knows|study|studies|read|reads|write|writes|listen|listens|watch|watches)\b',  # simple verbs
                 r'\b(do|does)\s+\w+\b',  # do/does + verb
-                r'\b(work|works|live|lives|play|plays|eat|eats|speak|speaks|know|knows)\b'  # simple verbs
+                r'\b(am|is|are)\s+\w+(?!ing)\b',  # be + not V-ing (but not continuous)
+                r'\bit\s+is\s+\w+\b'  # it is + adjective/noun (like "it is amazing")
             ]
         }
         
         # Check each pattern in order (most specific first)
         for pattern_name, regexes in pattern_map.items():
             for regex in regexes:
-                if re.search(regex, text, re.IGNORECASE):
-                    if pattern_name not in patterns_found:
-                        patterns_found.append(pattern_name)
-                    break
+                matches = re.findall(regex, text, re.IGNORECASE)
+                if matches:
+                    # Additional validation to reduce false positives
+                    if self._validate_pattern_match(pattern_name, matches, text):
+                        if pattern_name not in patterns_found:
+                            patterns_found.append(pattern_name)
+                        break
+        
+        return patterns_found
+    
+    def _validate_pattern_match(self, pattern_name: str, matches: List[str], text: str) -> bool:
+        """
+        Additional validation to reduce false positives in pattern detection
+        """
+        if not matches:
+            return False
+            
+        # For certain patterns, add extra validation
+        if pattern_name == "present_simple":
+            # Check that we're not matching present continuous forms
+            for match in matches:
+                if "ing" in match.lower():
+                    return False
+                    
+        elif pattern_name == "past_simple":
+            # Check that we're not matching past continuous or perfect forms
+            for match in matches:
+                if "been" in match.lower() or "ing" in match.lower():
+                    return False
+                    
+        elif pattern_name == "present_continuous":
+            # Ensure we're actually matching continuous forms
+            for match in matches:
+                if not any(word in match.lower() for word in ["ing", "am", "is", "are", "i'm", "he's", "she's", "it's", "we're", "you're", "they're"]):
+                    return False
+                    
+        return True
         
         return patterns_found
     
@@ -244,12 +283,18 @@ class AITeacherService:
             prompt = f"""
 You are an expert English teacher helping a {user_level} level Turkish student.
 
-TASK: Analyze and explain the grammar pattern "{pattern}" found in this text for Turkish learners.
+TASK: Analyze and explain ONLY the grammar pattern "{pattern}" found in this text for Turkish learners.
 
 TEXT: "{text_sample}"
 
+CRITICAL INSTRUCTION: 
+- You MUST explain ONLY the pattern "{pattern}" that was detected
+- Do NOT detect or explain other patterns
+- Focus ONLY on the specific pattern instances found in the text
+- Do NOT confuse with similar patterns
+
 FIRST: PATTERN DETECTION
-1. Find ALL instances of this grammar pattern in the text
+1. Find ALL instances of the SPECIFIC pattern "{pattern}" in the text
 2. Analyze how each instance is used
 3. Note any variations or special cases
 
@@ -258,7 +303,7 @@ THEN PROVIDE DETAILED EXPLANATION:
 2. STRUCTURE EXPLANATION: Explain the grammar rule and structure in simple terms
 3. USAGE PURPOSE: Explain when and why this pattern is used
 4. TEXT ANALYSIS: Analyze why this pattern was chosen in each instance
-5. INTERACTIVE QUIZ: Create a translation exercise using a similar pattern
+5. INTERACTIVE QUIZ: Create a translation exercise using a similar pattern (just the English sentence, no "Translate this sentence into Turkish:" prefix)
 6. HIDDEN ANSWER: Provide the correct translation (to be revealed later)
 7. LEARNING TIP: Give a practical tip for remembering this pattern
 
@@ -293,6 +338,8 @@ RULES:
 - Make quiz relevant to the pattern
 - Ensure all explanations are in Turkish except English examples
 - Adapt complexity to user level
+- DO NOT explain other patterns, only "{pattern}"
+- Quiz question should be ONLY the English sentence, no "Translate this sentence into Turkish:" prefix
 """
             
             response = self.model.generate_content(prompt)

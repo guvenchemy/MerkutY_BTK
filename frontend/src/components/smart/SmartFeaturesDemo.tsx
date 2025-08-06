@@ -151,6 +151,10 @@ export default function SmartFeaturesDemo({ username, initialText }: SmartFeatur
     
     const oldCheckedState = grammarKnowledge[pattern];
     
+    // Save current scroll position
+    const scrollContainer = document.querySelector('.overflow-y-auto');
+    const scrollPosition = scrollContainer?.scrollTop || 0;
+    
     try {
       // Update local state immediately for better UX
       setGrammarKnowledge(prev => ({
@@ -194,6 +198,13 @@ export default function SmartFeaturesDemo({ username, initialText }: SmartFeatur
             console.error('Failed to refresh grammar knowledge:', error);
           }
         }, 300); // Wait 300ms for backend to update
+        
+        // Restore scroll position after state updates
+        setTimeout(() => {
+          if (scrollContainer) {
+            scrollContainer.scrollTop = scrollPosition;
+          }
+        }, 500); // Increased delay to ensure all updates are complete
         
         console.log('Grammar pattern updated:', pattern, 'checked:', newCheckedState, 'status:', status);
       } else {

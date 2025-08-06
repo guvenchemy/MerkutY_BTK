@@ -248,4 +248,19 @@ async def list_users(db: Session = Depends(get_db)):
     List all users (for development/testing)
     """
     users = db.query(User).all()
-    return [{"id": user.id, "username": user.username, "email": user.email} for user in users] 
+    return [{"id": user.id, "username": user.username, "email": user.email} for user in users]
+
+@router.get("/users/{username}")
+async def get_user_by_username(username: str, db: Session = Depends(get_db)):
+    """
+    Get user by username
+    """
+    user = db.query(User).filter(User.username == username).first()
+    if not user:
+        raise HTTPException(status_code=404, detail=f"User '{username}' not found")
+    
+    return {
+        "id": user.id,
+        "username": user.username,
+        "email": user.email
+    } 

@@ -136,8 +136,13 @@ interface LibraryProps {
 
 const Library = ({ currentUser, userLevel }: LibraryProps) => {
   // State
+  const [activeTab, setActiveTab] = useState<'library' | 'discover'>('library');
   const [transcripts, setTranscripts] = useState<Transcript[]>([]);
+  const [discoverContent, setDiscoverContent] = useState<Transcript[]>([]);
+  const [discoverTotal, setDiscoverTotal] = useState(0);
+  const [libraryTotal, setLibraryTotal] = useState(0);
   const [selectedTranscript, setSelectedTranscript] = useState<Transcript | null>(null);
+  const [notification, setNotification] = useState<{type: 'success' | 'error', message: string} | null>(null);
   const [adaptedText, setAdaptedText] = useState('');
   const [filter, setFilter] = useState({ 
     channel: '', 
@@ -147,6 +152,7 @@ const Library = ({ currentUser, userLevel }: LibraryProps) => {
     cefrLevel: '' // CEFR level filter
   });
   const [page, setPage] = useState(1);
+  const [discoverPage, setDiscoverPage] = useState(1);
   const [loading, setLoading] = useState(true);
   const [adaptationLoading, setAdaptationLoading] = useState(false);
   
@@ -201,15 +207,93 @@ const Library = ({ currentUser, userLevel }: LibraryProps) => {
 
   // Database'den transcript'leri çek
   useEffect(() => {
-    fetchTranscripts();
-  }, []);
+    if (activeTab === 'library') {
+      fetchTranscripts();
+    } else {
+      fetchDiscoverContent();
+    }
+  }, [activeTab, discoverPage, currentUser]);
+
+  // Filter değiştiğinde discoverPage'i reset et
+  useEffect(() => {
+    if (activeTab === 'discover') {
+      setDiscoverPage(1);
+    }
+  }, [filter, activeTab]);
+
+  // Discover content boşsa otomatik yükle
+  useEffect(() => {
+    if (activeTab === 'discover' && discoverContent.length === 0 && currentUser) {
+      fetchDiscoverContent();
+    }
+  }, [activeTab, currentUser, discoverContent.length]);
+
+
+
+  // Auto-hide notification after 5 seconds
+  useEffect(() => {
+    if (notification) {
+      const timer = setTimeout(() => {
+        setNotification(null);
+      }, 5000);
+      return () => clearTimeout(timer);
+    }
+  }, [notification]);
+
+  const fetchDiscoverContent = async () => {
+    try {
+      setLoading(true);
+      console.log('🔍 Fetching discover content...');
+      
+      // Keşfet içeriğini getir (tüm içerik, filtreleme client-side yapılacak)
+      const discoverResponse = await fetch(`http://localhost:8000/api/library/discover?limit=1000&offset=0`);
+      
+      if (discoverResponse.ok) {
+        const discoverData = await discoverResponse.json();
+        if (discoverData.success && discoverData.data) {
+          console.log('🔍 Backend total:', discoverData.total);
+          setDiscoverTotal(discoverData.total || 0);
+          const discoverContentWithLevels = discoverData.data.map((content: any) => {
+            return {
+              id: content.id,
+              video_id: content.video_id,
+              video_title: content.video_title || 'Untitled Content',
+              channel_name: content.channel_name || 'Unknown Source',
+              duration: content.duration,
+              original_text: content.original_text,
+              adapted_text: content.adapted_text,
+              language: content.language || 'en',
+              word_count: content.word_count || 0,
+              adapted_word_count: content.adapted_word_count,
+              view_count: content.view_count || 0,
+              added_by: content.added_by || 'Unknown',
+              created_at: content.created_at,
+              content_type: content.content_type || 'youtube',
+              cefr_level: content.cefr_level,
+              level_confidence: content.level_confidence,
+              level_analysis: content.level_analysis,
+              level_analyzed_at: content.level_analyzed_at
+            };
+          });
+          
+          console.log('🔍 Discover content loaded:', discoverContentWithLevels.length, 'items');
+          console.log('🔍 First item:', discoverContentWithLevels[0]);
+          setDiscoverContent(discoverContentWithLevels);
+        }
+      }
+    } catch (error) {
+      console.error('Error fetching discover content:', error);
+    } finally {
+      setLoading(false);
+    }
+  };
 
   const fetchTranscripts = async () => {
     try {
       setLoading(true);
       
-      // YouTube transcripts'leri getir
-      const transcriptResponse = await fetch('http://localhost:8000/api/library/transcripts?limit=50&offset=0');
+      // YouTube transcripts'leri getir (sadece kullanıcının kendi videoları)
+      const transcriptResponse = await fetch(`http://localhost:8000/api/library/transcripts?limit=50&offset=0&username=${currentUser}`);
       
       // Web content'leri getir
       const webContentResponse = await fetch('http://localhost:8000/api/library/web-content?limit=50&offset=0');
@@ -296,6 +380,7 @@ const Library = ({ currentUser, userLevel }: LibraryProps) => {
       });
       
       setTranscripts(allTranscripts);
+      setLibraryTotal(allTranscripts.length);
     } catch (error) {
       console.error('Error fetching transcripts:', error);
     } finally {
@@ -343,6 +428,20 @@ const Library = ({ currentUser, userLevel }: LibraryProps) => {
     const cefrMatch = filter.cefrLevel ? t.cefr_level === filter.cefrLevel : true;
     return channelMatch && keywordMatch && minMatch && maxMatch && cefrMatch;
   });
+
+  // Keşfet için filtreleme (client-side, kütüphanem gibi)
+  const filteredDiscoverContent = discoverContent.filter(t => {
+    const channelMatch = filter.channel ? t.channel_name.toLowerCase().includes(filter.channel.toLowerCase()) : true;
+    const keywordMatch = filter.keyword ? t.video_title.toLowerCase().includes(filter.keyword.toLowerCase()) : true;
+    const minMatch = filter.minWords ? t.word_count >= parseInt(filter.minWords) : true;
+    const maxMatch = filter.maxWords ? t.word_count <= parseInt(filter.maxWords) : true;
+    const cefrMatch = filter.cefrLevel ? t.cefr_level === filter.cefrLevel : true;
+    
+    return channelMatch && keywordMatch && minMatch && maxMatch && cefrMatch;
+  });
+
+  // Keşfet için pagination
+  const paginatedDiscoverContent = filteredDiscoverContent.slice((discoverPage - 1) * PAGE_SIZE, discoverPage * PAGE_SIZE);
 
   // Sayfalama
   const totalPages = Math.ceil(filteredTranscripts.length / PAGE_SIZE);
@@ -413,6 +512,45 @@ const Library = ({ currentUser, userLevel }: LibraryProps) => {
     }
   };
 
+  // Kütüphaneme ekleme fonksiyonu
+  const handleAddToMyLibrary = async (content: Transcript) => {
+    try {
+      const token = localStorage.getItem('token');
+      console.log('🔑 Token:', token);
+      
+      if (!token) {
+        setNotification({ type: 'error', message: '❌ Oturum bulunamadı. Lütfen tekrar giriş yapın.' });
+        return;
+      }
+      
+      const response = await fetch('http://localhost:8000/api/library/add-to-my-library', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'Authorization': `Bearer ${token}`,
+        },
+        body: JSON.stringify({
+          content_id: content.id,
+          content_type: content.content_type || 'youtube'
+        }),
+      });
+
+      if (response.ok) {
+        const data = await response.json();
+        if (data.success) {
+          setNotification({ type: 'success', message: '✅ İçerik kütüphanene eklendi!' });
+        } else {
+          setNotification({ type: 'error', message: `❌ ${data.error}` });
+        }
+      } else {
+        setNotification({ type: 'error', message: '❌ Sunucu hatası' });
+      }
+    } catch (error) {
+      console.error('Error adding to library:', error);
+      setNotification({ type: 'error', message: '❌ İçerik eklenirken hata oluştu' });
+    }
+  };
+
   // PDF olarak indir fonksiyonu (gerçek implementation)
   const handleDownloadPDF = async (text: string, type: string) => {
     try {
@@ -461,8 +599,58 @@ const Library = ({ currentUser, userLevel }: LibraryProps) => {
 
   return (
     <div className="flex w-full min-h-[80vh] bg-gray-900 text-white">
+      {/* Notification */}
+      {notification && (
+        <div className={`fixed top-4 right-4 z-50 p-4 rounded-lg shadow-lg transition-all duration-300 ${
+          notification.type === 'success' 
+            ? 'bg-green-500 text-white' 
+            : 'bg-red-500 text-white'
+        }`}>
+          <div className="flex items-center gap-2">
+            <span>{notification.message}</span>
+            <button 
+              onClick={() => setNotification(null)}
+              className="ml-2 text-white hover:text-gray-200"
+            >
+              ✕
+            </button>
+          </div>
+        </div>
+      )}
       {/* Sol Panel: Transcript Listesi ve Filtreler */}
       <div className="w-full max-w-md bg-gray-800 p-6 border-r border-gray-700 flex flex-col">
+        {/* Tab Sistemi */}
+        <div className="mb-6">
+          <div className="flex bg-gray-700 rounded-lg p-1 mb-4">
+            <button
+              onClick={() => {
+                setActiveTab('library');
+                setPage(1);
+              }}
+              className={`flex-1 py-2 px-4 rounded-md font-medium transition-colors ${
+                activeTab === 'library'
+                  ? 'bg-teal-500 text-white'
+                  : 'text-gray-300 hover:text-white'
+              }`}
+            >
+              📚 Kütüphanem ({libraryTotal})
+            </button>
+            <button
+              onClick={() => {
+                setActiveTab('discover');
+                setDiscoverPage(1);
+              }}
+              className={`flex-1 py-2 px-4 rounded-md font-medium transition-colors ${
+                activeTab === 'discover'
+                  ? 'bg-teal-500 text-white'
+                  : 'text-gray-300 hover:text-white'
+              }`}
+            >
+              🔍 Keşfet ({activeTab === 'discover' ? filteredDiscoverContent.length : discoverContent.length})
+            </button>
+          </div>
+        </div>
+
         {/* Filtreler */}
         <div className="mb-6">
           <h3 className="text-lg font-bold text-teal-400 mb-4">🔍 Filtreler</h3>
@@ -489,6 +677,7 @@ const Library = ({ currentUser, userLevel }: LibraryProps) => {
 
           {/* CEFR Level Filtresi */}
           <select
+            key="cefr-level-select"
             className="w-full mb-3 p-3 rounded-lg border border-gray-600 bg-gray-700 text-white focus:outline-none focus:border-teal-400"
             value={filter.cefrLevel}
             onChange={e => setFilter(f => ({ ...f, cefrLevel: e.target.value }))}
@@ -503,6 +692,7 @@ const Library = ({ currentUser, userLevel }: LibraryProps) => {
           </select>
 
           <input
+            key="channel-input"
             type="text"
             placeholder="Kanal adı..."
             className="w-full mb-3 p-3 rounded-lg border border-gray-600 bg-gray-700 text-white placeholder-gray-400 focus:outline-none focus:border-teal-400"
@@ -510,6 +700,7 @@ const Library = ({ currentUser, userLevel }: LibraryProps) => {
             onChange={e => setFilter(f => ({ ...f, channel: e.target.value }))}
           />
           <input
+            key="keyword-input"
             type="text"
             placeholder="Anahtar kelime..."
             className="w-full mb-3 p-3 rounded-lg border border-gray-600 bg-gray-700 text-white placeholder-gray-400 focus:outline-none focus:border-teal-400"
@@ -518,6 +709,7 @@ const Library = ({ currentUser, userLevel }: LibraryProps) => {
           />
           <div className="flex gap-2">
             <input
+              key="min-words-input"
               type="number"
               placeholder="Min kelime"
               className="w-1/2 p-3 rounded-lg border border-gray-600 bg-gray-700 text-white placeholder-gray-400 focus:outline-none focus:border-teal-400"
@@ -525,6 +717,7 @@ const Library = ({ currentUser, userLevel }: LibraryProps) => {
               onChange={e => setFilter(f => ({ ...f, minWords: e.target.value }))}
             />
             <input
+              key="max-words-input"
               type="number"
               placeholder="Max kelime"
               className="w-1/2 p-3 rounded-lg border border-gray-600 bg-gray-700 text-white placeholder-gray-400 focus:outline-none focus:border-teal-400"
@@ -533,28 +726,26 @@ const Library = ({ currentUser, userLevel }: LibraryProps) => {
             />
           </div>
 
-          {/* AI Level Analysis Button */}
-          <button
-            onClick={analyzeLevels}
-            className="w-full mt-3 p-3 rounded-lg bg-teal-600 hover:bg-teal-700 text-white font-semibold transition-colors duration-200 flex items-center justify-center gap-2"
-            disabled={loading}
-          >
-            🤖 AI ile Seviye Analizi Yap
-          </button>
+          {/* AI Level Analysis Button - REMOVED */}
         </div>
 
         {/* Transcript Listesi */}
         <div className="flex-1 overflow-y-auto">
           <h3 className="text-lg font-bold text-teal-400 mb-4">
-            📚 Transkriptler ({filteredTranscripts.length})
+            {activeTab === 'library' ? '📚 Kütüphanem' : '🔍 Keşfet'} ({activeTab === 'library' ? filteredTranscripts.length : filteredDiscoverContent.length})
           </h3>
-          {paginatedTranscripts.length === 0 ? (
+          {(activeTab === 'library' ? paginatedTranscripts : filteredDiscoverContent).length === 0 ? (
             <div className="text-center text-gray-400 mt-8">
-              <p>Hiç transcript bulunamadı.</p>
-              <p className="text-sm mt-2">Filtrelerinizi kontrol edin veya yeni içerik ekleyin.</p>
+              <p>{activeTab === 'library' ? 'Hiç transcript bulunamadı.' : 'Hiç içerik bulunamadı.'}</p>
+              <p className="text-sm mt-2">
+                {activeTab === 'library' 
+                  ? 'Filtrelerinizi kontrol edin veya yeni içerik ekleyin.' 
+                  : 'Filtrelerinizi kontrol edin veya daha sonra tekrar deneyin.'
+                }
+              </p>
             </div>
           ) : (
-            paginatedTranscripts.map((t: Transcript) => (
+            (activeTab === 'library' ? paginatedTranscripts : paginatedDiscoverContent).map((t: Transcript) => (
               <div
                 key={`${t.content_type || 'youtube'}-${t.id}`}
                 className={`mb-4 rounded-lg shadow-lg p-4 cursor-pointer border-2 transition-all duration-200 ${
@@ -599,7 +790,21 @@ const Library = ({ currentUser, userLevel }: LibraryProps) => {
                 
                 <div className="flex justify-between items-center mt-2">
                   <span className="text-xs text-gray-400">{t.view_count} görüntülenme</span>
-                  <span className="text-xs text-gray-400 cursor-pointer hover:text-red-400">❤️</span>
+                  <div className="flex items-center gap-2">
+                    {activeTab === 'discover' && (
+                      <button
+                        onClick={(e) => {
+                          e.stopPropagation();
+                          handleAddToMyLibrary(t);
+                        }}
+                        className="text-xs bg-teal-500 hover:bg-teal-600 text-white px-2 py-1 rounded transition-colors"
+                        title="Kütüphaneme Ekle"
+                      >
+                        📚 Ekle
+                      </button>
+                    )}
+                    <span className="text-xs text-gray-400 cursor-pointer hover:text-red-400">❤️</span>
+                  </div>
                 </div>
               </div>
             ))
@@ -607,21 +812,50 @@ const Library = ({ currentUser, userLevel }: LibraryProps) => {
         </div>
 
         {/* Pagination */}
-        {totalPages > 1 && (
-          <div className="flex justify-center items-center gap-2 mt-6 pt-4 border-t border-gray-700">
-            {Array.from({ length: totalPages }, (_, i) => (
-              <button
-                key={i}
-                className={`px-3 py-2 rounded-lg font-medium transition-colors ${
-                  page === i + 1 
-                    ? 'bg-teal-500 text-white' 
-                    : 'bg-gray-700 text-gray-300 hover:bg-gray-600'
-                }`}
-                onClick={() => setPage(i + 1)}
-              >
-                {i + 1}
-              </button>
-            ))}
+        {activeTab === 'library' && totalPages > 1 && (
+          <div className="flex flex-col items-center gap-2 mt-6 pt-4 border-t border-gray-700">
+            <div className="text-sm text-gray-400 mb-2">
+              Sayfa {page}'de {paginatedTranscripts.length} içerik, toplam {libraryTotal} içerik
+            </div>
+            <div className="flex justify-center items-center gap-2">
+              {Array.from({ length: totalPages }, (_, i) => (
+                <button
+                  key={i}
+                  className={`px-3 py-2 rounded-lg font-medium transition-colors ${
+                    page === i + 1 
+                      ? 'bg-teal-500 text-white' 
+                      : 'bg-gray-700 text-gray-300 hover:bg-gray-600'
+                  }`}
+                  onClick={() => setPage(i + 1)}
+                >
+                  {i + 1}
+                </button>
+              ))}
+            </div>
+          </div>
+        )}
+        
+        {/* Keşfet Pagination */}
+        {activeTab === 'discover' && filteredDiscoverContent.length > 0 && (
+          <div className="flex flex-col items-center gap-2 mt-6 pt-4 border-t border-gray-700">
+            <div className="text-sm text-gray-400 mb-2">
+              Sayfa {discoverPage}'de {paginatedDiscoverContent.length} içerik, toplam {filteredDiscoverContent.length} içerik
+            </div>
+            <div className="flex justify-center items-center gap-2">
+              {Array.from({ length: Math.ceil(filteredDiscoverContent.length / PAGE_SIZE) }, (_, i) => (
+                <button
+                  key={i}
+                  className={`px-3 py-2 rounded-lg font-medium transition-colors ${
+                    discoverPage === i + 1 
+                      ? 'bg-teal-500 text-white' 
+                      : 'bg-gray-700 text-gray-300 hover:bg-gray-600'
+                  }`}
+                  onClick={() => setDiscoverPage(i + 1)}
+                >
+                  {i + 1}
+                </button>
+              ))}
+            </div>
           </div>
         )}
       </div>
@@ -664,60 +898,62 @@ const Library = ({ currentUser, userLevel }: LibraryProps) => {
           </div>
         </div>
 
-        {/* AI Adapted Kutusu */}
-        <div className="bg-gray-800 rounded-lg shadow-lg p-6 h-[350px] flex flex-col">
-          <div className="flex items-center justify-between mb-4">
-            <h2 className="text-xl font-bold text-white">🤖 AI Adapted Text</h2>
-            {selectedTranscript && selectedTranscript.original_text && (
-              <div className="flex gap-2">
-                <button 
-                  onClick={() => handleCopy(adaptedText)} 
-                  className="bg-blue-500 hover:bg-blue-600 text-white px-4 py-2 rounded-lg font-medium transition-colors disabled:opacity-50 disabled:cursor-not-allowed" 
-                  disabled={!adaptedText}
-                >
-                  📋 Kopyala
-                </button>
-                <button 
-                  onClick={() => handleDownloadPDF(adaptedText, 'adapted')} 
-                  className="bg-red-500 hover:bg-red-600 text-white px-4 py-2 rounded-lg font-medium transition-colors disabled:opacity-50 disabled:cursor-not-allowed" 
-                  disabled={!adaptedText}
-                >
-                  📄 PDF
-                </button>
-                <button 
-                  onClick={handleAdaptText}
-                  className="bg-teal-500 hover:bg-teal-600 text-white px-4 py-2 rounded-lg font-medium transition-colors disabled:opacity-50"
-                  disabled={adaptationLoading}
-                >
-                  {adaptationLoading ? '⏳ Adapte ediliyor...' : '🎯 Adapt et'}
-                </button>
-              </div>
-            )}
-          </div>
-          <div className="flex-1 text-gray-200 whitespace-pre-line overflow-y-auto bg-gray-700 rounded-lg p-4">
-            {adaptationLoading ? (
-              <div className="flex items-center justify-center h-full">
-                <div className="text-center">
-                  <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-teal-400 mx-auto mb-2"></div>
-                  <span className="text-gray-400">AI metni adapte ediyor...</span>
+        {/* AI Adapted Kutusu - Sadece Kütüphanem tab'ında göster */}
+        {activeTab === 'library' && (
+          <div className="bg-gray-800 rounded-lg shadow-lg p-6 h-[350px] flex flex-col">
+            <div className="flex items-center justify-between mb-4">
+              <h2 className="text-xl font-bold text-white">🤖 AI Adapted Text</h2>
+              {selectedTranscript && selectedTranscript.original_text && (
+                <div className="flex gap-2">
+                  <button 
+                    onClick={() => handleCopy(adaptedText)} 
+                    className="bg-blue-500 hover:bg-blue-600 text-white px-4 py-2 rounded-lg font-medium transition-colors disabled:opacity-50 disabled:cursor-not-allowed" 
+                    disabled={!adaptedText}
+                  >
+                    📋 Kopyala
+                  </button>
+                  <button 
+                    onClick={() => handleDownloadPDF(adaptedText, 'adapted')} 
+                    className="bg-red-500 hover:bg-red-600 text-white px-4 py-2 rounded-lg font-medium transition-colors disabled:opacity-50 disabled:cursor-not-allowed" 
+                    disabled={!adaptedText}
+                  >
+                    📄 PDF
+                  </button>
+                  <button 
+                    onClick={handleAdaptText}
+                    className="bg-teal-500 hover:bg-teal-600 text-white px-4 py-2 rounded-lg font-medium transition-colors disabled:opacity-50"
+                    disabled={adaptationLoading}
+                  >
+                    {adaptationLoading ? '⏳ Adapte ediliyor...' : '🎯 Adapt et'}
+                  </button>
                 </div>
-              </div>
-            ) : adaptedText ? (
-              <div className="leading-relaxed">
-                {renderClickableText(adaptedText)}
-              </div>
-            ) : (
-              <div className="flex items-center justify-center h-full">
-                <span className="text-gray-400 text-center">
-                  {selectedTranscript && selectedTranscript.original_text
-                    ? "🎯 Metni seviyenize uyarlamak için 'Adapt et' butonuna basın" 
-                    : "📖 Önce soldan bir metin seçin, sonra 'Adapt et' butonuna basın"
-                  }
-                </span>
-              </div>
-            )}
+              )}
+            </div>
+            <div className="flex-1 text-gray-200 whitespace-pre-line overflow-y-auto bg-gray-700 rounded-lg p-4">
+              {adaptationLoading ? (
+                <div className="flex items-center justify-center h-full">
+                  <div className="text-center">
+                    <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-teal-400 mx-auto mb-2"></div>
+                    <span className="text-gray-400">AI metni adapte ediyor...</span>
+                  </div>
+                </div>
+              ) : adaptedText ? (
+                <div className="leading-relaxed">
+                  {renderClickableText(adaptedText)}
+                </div>
+              ) : (
+                <div className="flex items-center justify-center h-full">
+                  <span className="text-gray-400 text-center">
+                    {selectedTranscript && selectedTranscript.original_text
+                      ? "🎯 Metni seviyenize uyarlamak için 'Adapt et' butonuna basın" 
+                      : "📖 Önce soldan bir metin seçin, sonra 'Adapt et' butonuna basın"
+                    }
+                  </span>
+                </div>
+              )}
+            </div>
           </div>
-        </div>
+        )}
       </div>
 
       {/* Word Explanation Popup */}

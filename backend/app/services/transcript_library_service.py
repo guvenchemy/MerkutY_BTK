@@ -1,4 +1,5 @@
 from sqlalchemy.orm import Session
+from sqlalchemy import text
 from app.models.user_vocabulary import ProcessedTranscript, User
 from app.services.yt_dlp_service import YTDlpService
 from app.services.ai_text_adaptation_service import AITextAdaptationService
@@ -17,6 +18,7 @@ class TranscriptLibraryService:
     def get_or_create_transcript(self, video_url: str, username: str, db: Session) -> Dict[str, Any]:
         """
         Get transcript from library or create new one.
+        Enhanced with discover library check to avoid duplicate processing.
         Returns transcript data with both original and adapted versions.
         """
         try:
@@ -25,27 +27,60 @@ class TranscriptLibraryService:
             if not video_id:
                 return {"error": "Invalid YouTube URL"}
             
-            # Check if transcript exists in library
-            existing_transcript = db.query(ProcessedTranscript).filter(
-                ProcessedTranscript.video_id == video_id
+            # Get user
+            user = db.query(User).filter(User.username == username).first()
+            if not user:
+                return {"error": "User not found"}
+            
+            # Check if transcript exists in user's own library
+            own_transcript = db.query(ProcessedTranscript).filter(
+                ProcessedTranscript.video_id == video_id,
+                ProcessedTranscript.added_by_user_id == user.id
             ).first()
             
-            if existing_transcript:
+            if own_transcript:
                 # Update view count
-                existing_transcript.view_count += 1
+                own_transcript.view_count += 1
                 db.commit()
                 
                 return {
                     "success": True,
                     "from_library": True,
+                    "from_own_library": True,
+                    "from_discover": False,
                     "video_id": video_id,
-                    "original_text": existing_transcript.original_text,
-                    "adapted_text": existing_transcript.adapted_text,
-                    "video_title": existing_transcript.video_title,
-                    "channel_name": existing_transcript.channel_name,
-                    "duration": existing_transcript.duration,
-                    "view_count": existing_transcript.view_count,
-                    "added_by": existing_transcript.added_by_username
+                    "original_text": own_transcript.original_text,
+                    "adapted_text": own_transcript.adapted_text,
+                    "video_title": own_transcript.video_title,
+                    "channel_name": own_transcript.channel_name,
+                    "duration": own_transcript.duration,
+                    "view_count": own_transcript.view_count,
+                    "added_by": own_transcript.added_by_username,
+                    "message": "Zaten kütüphanende olan içerik kullanıldı"
+                }
+            
+            # Check if transcript exists in discover (other users' libraries)
+            discover_transcript = db.query(ProcessedTranscript).filter(
+                ProcessedTranscript.video_id == video_id,
+                ProcessedTranscript.added_by_user_id != user.id
+            ).first()
+            
+            if discover_transcript:
+                # Don't add to user's library, just return the info
+                return {
+                    "success": True,
+                    "from_library": True,
+                    "from_own_library": False,
+                    "from_discover": True,
+                    "video_id": video_id,
+                    "original_text": discover_transcript.original_text,
+                    "adapted_text": discover_transcript.adapted_text,
+                    "video_title": discover_transcript.video_title,
+                    "channel_name": discover_transcript.channel_name,
+                    "duration": discover_transcript.duration,
+                    "view_count": discover_transcript.view_count,
+                    "added_by": discover_transcript.added_by_username,
+                    "message": "Keşfet'ten bulunan içerik kullanıldı"
                 }
             
             # Get user
@@ -66,7 +101,11 @@ class TranscriptLibraryService:
             # CEFR Level Detection with AI
             cefr_result = self.ai_service.detect_cefr_level(original_text)
             
-            # Save to library (only original text)
+            # AI Text Adaptation
+            adapted_result = self.ai_service.adapt_text_with_ai(original_text, username, db, target_unknown_percentage=5.0)
+            adapted_text = adapted_result.get("adapted_text", original_text)
+            
+            # Save to library with AI adaptation
             new_transcript = ProcessedTranscript(
                 video_id=video_id,
                 video_url=video_url,
@@ -74,10 +113,10 @@ class TranscriptLibraryService:
                 channel_name=video_info.get("uploader", "Unknown"),
                 duration=video_info.get("duration", 0),
                 original_text=original_text,
-                adapted_text=None,  # Don't save AI adaptation
+                adapted_text=adapted_text,  # Save AI adaptation
                 language=transcript_result.get("language", "en"),
                 word_count=len(original_text.split()),
-                adapted_word_count=0,  # Will be calculated on demand
+                adapted_word_count=len(adapted_text.split()),
                 added_by_user_id=user.id,
                 added_by_username=username,
                 view_count=1,
@@ -85,7 +124,7 @@ class TranscriptLibraryService:
                 cefr_level=cefr_result.get("cefr_level", "B1"),
                 level_confidence=cefr_result.get("confidence", 50),
                 level_analysis=cefr_result.get("analysis", "AI analysis completed"),
-                level_analyzed_at=db.execute("SELECT NOW()").scalar()
+                level_analyzed_at=db.execute(text("SELECT NOW()")).scalar()
             )
             
             db.add(new_transcript)
@@ -96,7 +135,7 @@ class TranscriptLibraryService:
                 "from_library": False,
                 "video_id": video_id,
                 "original_text": original_text,
-                "adapted_text": None,  # No AI adaptation stored
+                "adapted_text": adapted_text,  # AI adaptation included
                 "video_title": new_transcript.video_title,
                 "channel_name": new_transcript.channel_name,
                 "duration": new_transcript.duration,
@@ -108,12 +147,20 @@ class TranscriptLibraryService:
             logger.error(f"Error in get_or_create_transcript: {e}")
             return {"error": f"Transcript processing failed: {str(e)}"}
     
-    def get_library_transcripts(self, db: Session, limit: int = 50, offset: int = 0) -> List[Dict[str, Any]]:
-        """Get all transcripts from library with pagination."""
+    def get_library_transcripts(self, db: Session, limit: int = 50, offset: int = 0, username: str = None) -> List[Dict[str, Any]]:
+        """Get transcripts from library with pagination. If username provided, only return user's transcripts."""
         try:
-            transcripts = db.query(ProcessedTranscript).filter(
+            query = db.query(ProcessedTranscript).filter(
                 ProcessedTranscript.is_active == True
-            ).order_by(
+            )
+            
+            # If username provided, filter by user
+            if username:
+                user = db.query(User).filter(User.username == username).first()
+                if user:
+                    query = query.filter(ProcessedTranscript.added_by_user_id == user.id)
+            
+            transcripts = query.order_by(
                 ProcessedTranscript.view_count.desc()
             ).offset(offset).limit(limit).all()
             
