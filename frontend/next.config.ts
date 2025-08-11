@@ -15,6 +15,9 @@ const nextConfig: NextConfig = {
   // Performance optimizations
   poweredByHeader: false,
   
+  // Docker support - standalone output
+  output: 'standalone',
+  
   // Bundle analysis (development only)
   ...(process.env.ANALYZE === 'true' && {
     webpack: (config: any) => {

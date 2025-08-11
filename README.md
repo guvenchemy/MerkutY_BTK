@@ -4,6 +4,30 @@
 
 ## 🚀 Hızlı Kurulum (Arkadaşlar İçin)
 
+### 🐳 Docker ile NAS Sunucuda Kurulum (Önerilen)
+
+NAS sunucunuzda PostgreSQL 17 zaten yüklü olduğu için:
+
+```bash
+# 1. Hızlı kurulum script'ini çalıştır
+chmod +x hizli_kurulum.sh
+./hizli_kurulum.sh
+
+# 2. Veya Windows'ta:
+hizli_kurulum.bat
+```
+
+**Gereksinimler:**
+- Docker ve Docker Compose
+- PostgreSQL 17 (NAS'ta mevcut)
+- Gemini API Key
+
+**Detaylı kurulum için:** [KURULUM_REHBERI.md](KURULUM_REHBERI.md) dosyasını okuyun.
+
+---
+
+## 🛠️ Manuel Kurulum (Development)
+
 ### Ön Gereksinimler
 - Python 3.9+ 
 - Node.js 16+
