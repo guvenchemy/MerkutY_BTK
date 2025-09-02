@@ -41,7 +41,7 @@ export class SmartAPI {
           example_translation: 'Çeviri mevcut değil',
           difficulty_level: 1,
           created_at: new Date().toISOString(),
-          is_from_cache: false,
+          from_cache: false,
         },
         error: error instanceof Error ? error.message : 'Unknown error',
       };
