@@ -40,7 +40,7 @@ export default function LoginPage() {
       } else {
         setError(data.detail || 'Giriş başarısız');
       }
-    } catch (err) {
+    } catch (_err) {
       setError('Bağlantı hatası');
     } finally {
       setIsLoading(false);

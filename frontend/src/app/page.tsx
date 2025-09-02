@@ -1,6 +1,6 @@
 'use client';
 
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useCallback } from 'react';
 import { useRouter } from 'next/navigation';
 import VocabularyUpload from '../components/VocabularyUpload';
 import SmartFeaturesDemo from '../components/smart/SmartFeaturesDemo';
@@ -95,13 +95,14 @@ interface GrammarAnalysis {
   summary: string;
 }
 
-interface GrammarAnalysisResult {
-  grammar_analysis: GrammarAnalysis;
-  original_text: string;
-  analysis_type: string;
-  total_patterns: number;
-  learning_points: number;
-}
+// Currently unused interface - kept for future features
+// interface GrammarAnalysisResult {
+//   grammar_analysis: GrammarAnalysis;
+//   original_text: string;
+//   analysis_type: string;
+//   total_patterns: number;
+//   learning_points: number;
+// }
 
 export default function Home() {
   const router = useRouter();
@@ -125,8 +126,8 @@ export default function Home() {
   const [adaptationResult, setAdaptationResult] = useState<AdaptationResult | null>(null);
   
   // Interactive Features State (currently unused - kept for future features)
-  const [selectedText, setSelectedText] = useState<string | null>(null);
-  const [selectedWord, setSelectedWord] = useState<string | null>(null);
+  // const [selectedText, setSelectedText] = useState<string | null>(null);
+  // const [selectedWord, setSelectedWord] = useState<string | null>(null);
   
   // Modern Word Popup State (replacing old explanation modal)
   const [wordPopup, setWordPopup] = useState<{
@@ -140,7 +141,7 @@ export default function Home() {
   });
   
   // Currently unused - kept for future features
-  const [isAddingWord, setIsAddingWord] = useState(false);
+  // const [isAddingWord, setIsAddingWord] = useState(false);
   
   // Settings State - Removed target percentage (not needed)
 
@@ -209,7 +210,7 @@ export default function Home() {
 
   // No demo login - redirect to proper auth
 
-  const handleLogout = () => {
+  const handleLogout = useCallback(() => {
     // Clear localStorage
     localStorage.removeItem('token');
     localStorage.removeItem('user');
@@ -231,7 +232,7 @@ export default function Home() {
     
     // Redirect to login
     router.push('/login');
-  };
+  }, [router]);
 
   // Check authentication on component mount
   useEffect(() => {
@@ -271,7 +272,7 @@ export default function Home() {
     }
   }, [currentUser, isLoggedIn]);
 
-  const loadUserStats = async () => {
+  const loadUserStats = useCallback(async () => {
     try {
       const token = localStorage.getItem('token');
       const url = `http://localhost:8000/api/adaptation/user-stats/${currentUser}`;
@@ -294,7 +295,7 @@ export default function Home() {
     } catch (err) {
       console.error('Failed to load user stats:', err);
     }
-  };
+  }, [currentUser, handleLogout]);
 
   // URL tipini otomatik algıla
   const detectUrlType = (url: string): 'youtube' | 'medium' | 'wikipedia' | 'unsupported' => {
@@ -514,8 +515,8 @@ export default function Home() {
           reloadWordAnalysis();
         }
         
-      } catch (err: any) {
-        setError(err.message);
+      } catch (err: unknown) {
+        setError(err instanceof Error ? err.message : 'An error occurred');
       } finally {
         setIsLoading(false);
       }
@@ -571,8 +572,8 @@ export default function Home() {
       }
       setError(successMessage);
       
-    } catch (err: any) {
-      setError(err.message);
+    } catch (err: unknown) {
+      setError(err instanceof Error ? err.message : 'An error occurred');
     } finally {
       setIsLoading(false);
     }
@@ -587,8 +588,8 @@ export default function Home() {
       selectedText = selectedText.replace(/^\s+|\s+$/g, '').replace(/\s+/g, ' ');
       
       console.log('Selected text:', selectedText);
-      setSelectedText(selectedText); // Currently unused
-      setSelectedWord(selectedText); // Currently unused
+      // setSelectedText(selectedText); // Currently unused
+      // setSelectedWord(selectedText); // Currently unused
       
       // Open word popup for selected text (center of screen since no event)
       setWordPopup({
@@ -701,10 +702,12 @@ export default function Home() {
     setWordPopup(newPopupState);
   };
 
+  // Currently unused function - kept for future features
+  /*
   const handleAddWordToVocabulary = async (word: string, action: 'know' | 'unknown' | 'ignore') => {
     console.log('🏠 HOMEPAGE handleAddWordToVocabulary called with:', { word, action });
     
-    setIsAddingWord(true); // Currently unused
+    // setIsAddingWord(true); // Currently unused
     
     try {
       const response = await fetch('http://localhost:8000/api/vocabulary/add-word', {
@@ -756,10 +759,13 @@ export default function Home() {
       console.error('Failed to add word:', err);
       alert('Kelime eklenirken hata oluştu.');
     } finally {
-      setIsAddingWord(false); // Currently unused
+      // setIsAddingWord(false); // Currently unused
     }
   };
+  */
 
+  // Currently unused function - kept for future features
+  /*
   const handleGrammarAnalysis = async () => {
     // Use adapted text first (shorter, user-appropriate), fallback to original
     const textToAnalyze = adaptedText || originalText;
@@ -773,6 +779,7 @@ export default function Home() {
     setSmartAnalysisText(textToAnalyze);
     setActiveTab('smart');
   };
+  */
 
   const isWordKnown = (word: string, wordAnalysis?: { word_status: { [key: string]: boolean } }): boolean => {
     if (!wordAnalysis || !wordAnalysis.word_status) {
@@ -784,7 +791,7 @@ export default function Home() {
     return wordAnalysis.word_status[cleanWord] === true;
   };
 
-  const renderClickableText = (text: string, isAdapted: boolean = false, wordAnalysis?: { word_status: { [key: string]: boolean } }) => {
+  const renderClickableText = (text: string, _isAdapted: boolean = false, wordAnalysis?: { word_status: { [key: string]: boolean } }) => {
     // Type check - eğer text string değilse boş string kullan
     const safeText = typeof text === 'string' ? text : '';
     
@@ -809,10 +816,10 @@ export default function Home() {
           }
           
           const cleanWord = part.toLowerCase().trim();
-          const known = isWordKnown(cleanWord, wordAnalysis);
+          // const known = isWordKnown(cleanWord, wordAnalysis); // Currently unused
           
           // Simple clickable styling - NO COLOR CODING
-          let wordClass = "cursor-pointer px-1 rounded transition-colors duration-200 hover:bg-gray-600 hover:text-white";
+          const wordClass = "cursor-pointer px-1 rounded transition-colors duration-200 hover:bg-gray-600 hover:text-white";
           
           return (
             <span

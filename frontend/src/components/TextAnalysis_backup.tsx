@@ -136,13 +136,13 @@ const TextAnalysis: React.FC = () => {
   const [error, setError] = useState('');
   const [activeTab, setActiveTab] = useState<'text' | 'url'>('text');
   const [includeAdaptation, setIncludeAdaptation] = useState(false);
-  const [pdfGenerating, setPdfGenerating] = useState(false);
+  // const [pdfGenerating, setPdfGenerating] = useState(false); // Currently unused
   const [userId] = useState<number>(1); // Geçici user ID
-  const [grammarUpdating, setGrammarUpdating] = useState<string | null>(null);
-  const [selectedWord, setSelectedWord] = useState<string | null>(null);
-  const [wordTranslation, setWordTranslation] = useState<WordTranslation | null>(null);
-  const [translationLoading, setTranslationLoading] = useState(false);
-  const [userKnownWords, setUserKnownWords] = useState<string[]>([]);
+  // const [grammarUpdating, setGrammarUpdating] = useState<string | null>(null); // Currently unused
+  // const [selectedWord, setSelectedWord] = useState<string | null>(null); // Currently unused
+  // const [wordTranslation, setWordTranslation] = useState<WordTranslation | null>(null); // Currently unused
+  // const [translationLoading, setTranslationLoading] = useState(false); // Currently unused
+  // const [userKnownWords, setUserKnownWords] = useState<string[]>([]); // Currently unused
 
   // URL tipini otomatik algıla
   const detectUrlType = (url: string): 'youtube' | 'medium' | 'wikipedia' | 'unsupported' => {
@@ -225,7 +225,7 @@ const TextAnalysis: React.FC = () => {
 
     try {
       let endpoint = '';
-      let requestBody: any = {
+      const requestBody: Record<string, unknown> = {
         include_examples: true,
         include_adaptation: includeAdaptation,
         user_id: userId

@@ -1,7 +1,7 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useCallback } from 'react';
 import WordExplanationPopup from './smart/WordExplanationPopup';
 
-const levels = ['A1', 'A2', 'B1', 'B2', 'C1', 'C2'];
+// const levels = ['A1', 'A2', 'B1', 'B2', 'C1', 'C2']; // Currently unused
 
 // Helper to derive source label from content
 const getSourceLabel = (t: { content_type?: 'youtube' | 'web'; channel_name?: string; }): string => {
@@ -35,7 +35,8 @@ interface Transcript {
   level_analyzed_at?: string; // When level was determined
 }
 
-// AI ile text level analizi yapan fonksiyon
+// AI ile text level analizi yapan fonksiyon - Currently unused
+/*
 const analyzeTextLevel = async (text: string): Promise<{ level: string; category: string }> => {
   try {
     // Basit kelime sayısı ve karmaşıklık analizi
@@ -69,6 +70,7 @@ const analyzeTextLevel = async (text: string): Promise<{ level: string; category
     return { level: 'A1', category: 'General' };
   }
 };
+*/
 
 // Gerçek AI adaptation fonksiyonu
 const adaptTextWithAI = async (transcriptId: number, username: string, contentType: string = 'youtube'): Promise<string> => {
@@ -262,7 +264,7 @@ const Library = ({ currentUser, userLevel }: LibraryProps) => {
         if (discoverData.success && discoverData.data) {
           console.log('🔍 Backend total:', discoverData.total);
           setDiscoverTotal(discoverData.total || 0);
-          const discoverContentWithLevels = discoverData.data.map((content: any) => {
+          const discoverContentWithLevels = discoverData.data.map((content: Transcript) => {
             return {
               id: content.id,
               video_id: content.video_id,
@@ -297,7 +299,7 @@ const Library = ({ currentUser, userLevel }: LibraryProps) => {
     }
   };
 
-  const fetchTranscripts = async () => {
+  const fetchTranscripts = useCallback(async () => {
     try {
       setLoading(true);
       
@@ -307,14 +309,14 @@ const Library = ({ currentUser, userLevel }: LibraryProps) => {
       // Web content'leri getir
       const webContentResponse = await fetch('http://localhost:8000/api/library/web-content?limit=50&offset=0');
       
-      let allTranscripts: any[] = [];
+      let allTranscripts: Transcript[] = [];
       
       // YouTube transcripts'leri işle
       if (transcriptResponse.ok) {
         const transcriptData = await transcriptResponse.json();
         if (transcriptData.success && transcriptData.data) {
           // Backend'den gelen CEFR level verilerini kullan
-          const transcriptsWithLevels = transcriptData.data.map((transcript: any) => {
+          const transcriptsWithLevels = transcriptData.data.map((transcript: Transcript) => {
             return {
               id: transcript.id,
               video_id: transcript.video_id,
@@ -347,33 +349,45 @@ const Library = ({ currentUser, userLevel }: LibraryProps) => {
         const webData = await webContentResponse.json();
         if (webData.success && webData.data) {
           const webContentsWithLevels = await Promise.all(
-            webData.data.map(async (content: any) => {
+            webData.data.map(async (content: unknown) => {
+              const webContent = content as { 
+                id: number; 
+                title?: string; 
+                url?: string; 
+                content?: string; 
+                created_at?: string; 
+                word_count?: number; 
+                cefr_level?: string;
+                level_confidence?: number;
+                level_analysis?: string;
+                level_analyzed_at?: string;
+              };
               // Backend'den gelen CEFR verilerini kullan
-              let level = content.cefr_level || 'N/A';
-              let category = 'Web Article';
+              const level = webContent.cefr_level || 'N/A';
+              const category = 'Web Article';
               
               return {
-                id: content.id,
+                id: webContent.id,
                 video_id: null,
-                video_title: content.title || 'Web Article',
-                channel_name: content.url || 'Web Source',
+                video_title: webContent.title || 'Web Article',
+                channel_name: webContent.url || 'Web Source',
                 duration: null,
                 original_text: null, // Detayda alınacak
                 adapted_text: null,
                 language: 'en',
-                word_count: content.word_count || 0,
+                word_count: webContent.word_count || 0,
                 adapted_word_count: 0,
                 view_count: 0,
                 added_by: 'User',
-                created_at: content.created_at,
+                created_at: webContent.created_at,
                 level: level,
                 category: category,
                 content_type: 'web',
                 // CEFR data from backend
-                cefr_level: content.cefr_level,
-                level_confidence: content.level_confidence,
-                level_analysis: content.level_analysis,
-                level_analyzed_at: content.level_analyzed_at
+                cefr_level: webContent.cefr_level,
+                level_confidence: webContent.level_confidence,
+                level_analysis: webContent.level_analysis,
+                level_analyzed_at: webContent.level_analyzed_at
               };
             })
           );
@@ -395,9 +409,10 @@ const Library = ({ currentUser, userLevel }: LibraryProps) => {
     } finally {
       setLoading(false);
     }
-  };
+  }, [currentUser]);
 
-  // AI ile mevcut transcript'lerin seviyelerini analiz et
+  // AI ile mevcut transcript'lerin seviyelerini analiz et - Currently unused
+  /*
   const analyzeLevels = async () => {
     try {
       setLoading(true);
@@ -427,6 +442,7 @@ const Library = ({ currentUser, userLevel }: LibraryProps) => {
       setLoading(false);
     }
   };
+  */
 
   // Filtreleme
   const filteredTranscripts = transcripts.filter(t => {
@@ -827,7 +843,7 @@ const Library = ({ currentUser, userLevel }: LibraryProps) => {
         {activeTab === 'library' && totalPages > 1 && (
           <div className="flex flex-col items-center gap-2 mt-6 pt-4 border-t border-gray-700">
             <div className="text-sm text-gray-400 mb-2">
-              Sayfa {page}'de {paginatedTranscripts.length} içerik, toplam {libraryTotal} içerik
+              Sayfa {page}&apos;de {paginatedTranscripts.length} içerik, toplam {libraryTotal} içerik
             </div>
             <div className="flex justify-center items-center gap-2">
               {Array.from({ length: totalPages }, (_, i) => (
@@ -851,7 +867,7 @@ const Library = ({ currentUser, userLevel }: LibraryProps) => {
         {activeTab === 'discover' && filteredDiscoverContent.length > 0 && (
           <div className="flex flex-col items-center gap-2 mt-6 pt-4 border-t border-gray-700">
             <div className="text-sm text-gray-400 mb-2">
-              Sayfa {discoverPage}'de {paginatedDiscoverContent.length} içerik, toplam {filteredDiscoverContent.length} içerik
+              Sayfa {discoverPage}&apos;de {paginatedDiscoverContent.length} içerik, toplam {filteredDiscoverContent.length} içerik
             </div>
             <div className="flex justify-center items-center gap-2">
               {Array.from({ length: Math.ceil(filteredDiscoverContent.length / PAGE_SIZE) }, (_, i) => (

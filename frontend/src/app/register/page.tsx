@@ -69,7 +69,7 @@ export default function RegisterPage() {
       } else {
         setError(data.detail || 'Kayıt başarısız');
       }
-    } catch (err) {
+    } catch (_err) {
       setError('Bağlantı hatası');
     } finally {
       setIsLoading(false);

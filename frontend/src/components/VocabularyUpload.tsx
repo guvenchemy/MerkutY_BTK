@@ -45,8 +45,8 @@ export default function VocabularyUpload({ username, onUploadSuccess }: Vocabula
         `Successfully processed ${data.words_processed} words, added ${data.words_added} new words to your vocabulary. New level: ${data.user_level.level}`
       );
       onUploadSuccess();
-    } catch (err: any) {
-      setError(err.message);
+    } catch (err: unknown) {
+      setError(err instanceof Error ? err.message : 'An error occurred');
     } finally {
       setIsUploading(false);
       // Reset file input
@@ -61,7 +61,7 @@ export default function VocabularyUpload({ username, onUploadSuccess }: Vocabula
       <div className="space-y-4">
         <div>
           <label htmlFor="vocabulary-file" className="block text-sm text-gray-300 mb-2">
-            Upload Excel file with your known words (single column: "words")
+            Upload Excel file with your known words (single column: &quot;words&quot;)
           </label>
           <input
             id="vocabulary-file"
@@ -93,7 +93,7 @@ export default function VocabularyUpload({ username, onUploadSuccess }: Vocabula
         )}
 
         <div className="text-xs text-gray-400">
-          💡 <strong>Excel Format:</strong> Create a single column with header "words" and list your known words below.
+          💡 <strong>Excel Format:</strong> Create a single column with header &quot;words&quot; and list your known words below.
         </div>
       </div>
     </div>
