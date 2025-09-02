@@ -72,28 +72,28 @@ interface AdaptationResult {
 //   example_explanation: string;
 // }
 
-interface GrammarAnalysis {
-  grammar_patterns: Array<{
-    pattern: string;
-    explanation: string;
-    examples: string[];
-    rules: string[];
-    difficulty: string;
-  }>;
-  key_grammar_points: Array<{
-    point: string;
-    description: string;
-    examples: string[];
-    learning_tip: string;
-  }>;
-  vocabulary_grammar_connection: Array<{
-    word: string;
-    grammar_usage: string;
-    examples: string[];
-  }>;
-  learning_recommendations: string[];
-  summary: string;
-}
+// interface GrammarAnalysis {
+//   grammar_patterns: Array<{
+//     pattern: string;
+//     explanation: string;
+//     examples: string[];
+//     rules: string[];
+//     difficulty: string;
+//   }>;
+//   key_grammar_points: Array<{
+//     point: string;
+//     description: string;
+//     examples: string[];
+//     learning_tip: string;
+//   }>;
+//   vocabulary_grammar_connection: Array<{
+//     word: string;
+//     grammar_usage: string;
+//     examples: string[];
+//   }>;
+//   learning_recommendations: string[];
+//   summary: string;
+// }
 
 // Currently unused interface - kept for future features
 // interface GrammarAnalysisResult {
@@ -109,7 +109,7 @@ export default function Home() {
   
   // Authentication State
   const [isLoggedIn, setIsLoggedIn] = useState(false);
-  const [user, setUser] = useState<{ id: number; username: string } | null>(null);
+  // const [user, setUser] = useState<{ id: number; username: string } | null>(null); // Currently unused
   
   // User Management State
   const [currentUser, setCurrentUser] = useState('');
@@ -147,7 +147,7 @@ export default function Home() {
 
   // Tab State
   const [activeTab, setActiveTab] = useState<'adaptation' | 'smart' | 'library' | 'vocabulary'>('adaptation');
-  const [smartAnalysisText, setSmartAnalysisText] = useState<string>('');
+  // const [smartAnalysisText, setSmartAnalysisText] = useState<string>(''); // Currently unused
 
   // Grammar Analysis State - Currently unused (handled in Smart AI Teacher tab)
   // const [grammarAnalysisResult, setGrammarAnalysisResult] = useState<GrammarAnalysisResult | null>(null);
@@ -225,7 +225,7 @@ export default function Home() {
     setOriginalText('');
     setAdaptedText('');
     setAdaptationResult(null);
-    setUser(null);
+    // setUser(null); // Currently unused
     setUrl('');
     setError('');
     setIsLoading(false);
@@ -242,7 +242,7 @@ export default function Home() {
     if (token && userData) {
       try {
         const user = JSON.parse(userData);
-        setUser(user);
+        // setUser(user); // Currently unused
         setCurrentUser(user.username);
         setIsLoggedIn(true);
         
@@ -781,15 +781,15 @@ export default function Home() {
   };
   */
 
-  const isWordKnown = (word: string, wordAnalysis?: { word_status: { [key: string]: boolean } }): boolean => {
-    if (!wordAnalysis || !wordAnalysis.word_status) {
-      // If no word analysis available, assume unknown (safer approach)
-      return false;
-    }
-    
-    const cleanWord = word.toLowerCase().trim();
-    return wordAnalysis.word_status[cleanWord] === true;
-  };
+  // const isWordKnown = (word: string, wordAnalysis?: { word_status: { [key: string]: boolean } }): boolean => {
+  //   if (!wordAnalysis || !wordAnalysis.word_status) {
+  //     // If no word analysis available, assume unknown (safer approach)
+  //     return false;
+  //   }
+  //   
+  //   const cleanWord = word.toLowerCase().trim();
+  //   return wordAnalysis.word_status[cleanWord] === true;
+  // };
 
   const renderClickableText = (text: string, _isAdapted: boolean = false, wordAnalysis?: { word_status: { [key: string]: boolean } }) => {
     // Type check - eğer text string değilse boş string kullan
@@ -1136,7 +1136,7 @@ export default function Home() {
               <div className="bg-gray-900">
                 <SmartFeaturesDemo 
                   username={currentUser} 
-                  initialText={smartAnalysisText || ""}
+                  initialText={""}
                 />
               </div>
             )}

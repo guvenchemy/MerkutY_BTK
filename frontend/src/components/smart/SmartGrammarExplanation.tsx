@@ -310,7 +310,7 @@ export default function SmartGrammarExplanation({
                         return (
                           <div key={idx} className="text-sm">
                             <p className="text-gray-700">
-                              <span className="font-medium">Örnek {idx + 1}:</span> "{String(example.sentence || '')}"
+                              <span className="font-medium">Örnek {idx + 1}:</span> &quot;{String(example.sentence || '')}&quot;
                             </p>
                             {example.analysis && (
                               <p className="text-gray-600 text-xs mt-1 pl-4">
@@ -324,7 +324,7 @@ export default function SmartGrammarExplanation({
                         return (
                           <div key={idx} className="text-sm">
                             <p className="text-gray-700">
-                              <span className="font-medium">Örnek {idx + 1}:</span> "{String(example.sentence || '')}"
+                              <span className="font-medium">Örnek {idx + 1}:</span> &quot;{String(example.sentence || '')}&quot;
                             </p>
                             <div className="mt-1 pl-4 space-y-1">
                               <p className="text-blue-600 text-xs">
@@ -348,7 +348,7 @@ export default function SmartGrammarExplanation({
                         return (
                           <div key={idx} className="text-sm">
                             <p className="text-gray-700">
-                              <span className="font-medium">Örnek {idx + 1}:</span> "{String(example.example || '')}"
+                              <span className="font-medium">Örnek {idx + 1}:</span> &quot;{String(example.example || '')}&quot;
                             </p>
                             {example.explanation && (
                               <p className="text-gray-600 text-xs mt-1 pl-4">
@@ -381,7 +381,7 @@ export default function SmartGrammarExplanation({
                       // Fallback for unknown types
                       return (
                         <p key={idx} className="text-gray-700">
-                          <span className="font-medium">Örnek {idx + 1}:</span> "{String(example || 'Geçersiz örnek')}"
+                          <span className="font-medium">Örnek {idx + 1}:</span> &quot;{String(example || 'Geçersiz örnek')}&quot;
                         </p>
                       );
                     }
