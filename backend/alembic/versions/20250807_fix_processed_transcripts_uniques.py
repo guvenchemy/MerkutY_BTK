@@ -31,13 +31,27 @@ def upgrade() -> None:
     # Create non-unique index on video_id for lookup speed
     op.create_index(op.f('ix_processed_transcripts_video_id'), 'processed_transcripts', ['video_id'], unique=False)
 
-    # Create composite unique (video_id, added_by_user_id)
-    op.create_unique_constraint('uq_transcript_video_user', 'processed_transcripts', ['video_id', 'added_by_user_id'])
+    # Create composite unique constraint only if it doesn't exist
+    op.execute("""
+        DO $$
+        BEGIN
+            IF NOT EXISTS (
+                SELECT 1 FROM information_schema.table_constraints 
+                WHERE constraint_name = 'uq_transcript_video_user' 
+                AND table_name = 'processed_transcripts'
+                AND table_schema = 'public'
+            ) THEN
+                ALTER TABLE processed_transcripts 
+                ADD CONSTRAINT uq_transcript_video_user 
+                UNIQUE (video_id, added_by_user_id);
+            END IF;
+        END $$;
+    """)
 
 
 def downgrade() -> None:
-    # Drop composite unique
-    op.drop_constraint('uq_transcript_video_user', 'processed_transcripts', type_='unique')
+    # Drop composite unique constraint if exists
+    op.execute("ALTER TABLE processed_transcripts DROP CONSTRAINT IF EXISTS uq_transcript_video_user;")
     # Recreate unique index on video_id (previous behavior) if desired
     try:
         op.drop_index(op.f('ix_processed_transcripts_video_id'), table_name='processed_transcripts')
