@@ -1,8 +1,8 @@
 'use client';
 
-import React, { useState, useEffect, useMemo } from 'react';
+import React, { useState, useEffect, useMemo, useCallback } from 'react';
 import { SmartAPI } from './api';
-import { UserLevelResponse, GrammarDashboardResponse } from './types';
+import { UserLevelResponse } from './types';
 
 interface UserLevelDashboardProps {
   userId: number;
@@ -39,11 +39,35 @@ interface UserLevelExtended {
   level_progress?: number; // Backward compatibility
 }
 
-// Grammar pattern definitions by level
-const getA1Patterns = () => ["present_simple", "present_continuous", "basic_questions", "basic_negatives", "articles", "prepositions_place"];
-const getA2Patterns = () => ["past_simple", "future_will", "future_going_to", "basic_comparatives", "basic_modals", "time_expressions", "prepositions_time", "question_formation"];
-const getB1Patterns = () => ["present_perfect", "present_perfect_continuous", "conditionals_type1", "passive_voice_simple", "relative_clauses_basic", "modal_verbs_basic", "gerunds_infinitives", "adjective_intensifiers"];
-const getB2Patterns = () => ["past_perfect", "past_continuous", "future_continuous", "conditionals_type2", "passive_voice_advanced", "passive_voice_perfect", "reported_speech", "modal_verbs_advanced", "relative_clauses_advanced", "superlatives"];
+interface GrammarOverviewLevel {
+  known?: string[];
+  practice?: string[];
+  unknown?: string[];
+}
+
+interface GrammarOverview {
+  overview?: Record<string, GrammarOverviewLevel>;
+}
+
+interface DashboardData {
+  success?: boolean;
+  grammar_overview?: {
+    known_patterns?: string[];
+    practice_patterns?: string[];
+    unknown_patterns?: string[];
+    total_patterns?: number;
+    progress_percentage?: number;
+    overview?: Record<string, GrammarOverviewLevel>;
+  };
+  user_level?: Record<string, unknown>;
+  learning_path?: unknown[];
+}
+
+// Grammar pattern definitions by level (currently unused but kept for future use)
+// const getA1Patterns = () => ["present_simple", "present_continuous", "basic_questions", "basic_negatives", "articles", "prepositions_place"];
+// const getA2Patterns = () => ["past_simple", "future_will", "future_going_to", "basic_comparatives", "basic_modals", "time_expressions", "prepositions_time", "question_formation"];
+// const getB1Patterns = () => ["present_perfect", "present_perfect_continuous", "conditionals_type1", "passive_voice_simple", "relative_clauses_basic", "modal_verbs_basic", "gerunds_infinitives", "adjective_intensifiers"];
+// const getB2Patterns = () => ["past_perfect", "past_continuous", "future_continuous", "conditionals_type2", "passive_voice_advanced", "passive_voice_perfect", "reported_speech", "modal_verbs_advanced", "relative_clauses_advanced", "superlatives"];
 
 // Grammar pattern display names
 const getPatternDisplayName = (pattern: string): string => {
@@ -92,6 +116,8 @@ interface GrammarPatternCheckboxProps {
   onStatusChange?: (pattern: string, isKnown: boolean) => void;
 }
 
+// Currently unused component - kept for future functionality
+/*
 const GrammarPatternCheckbox: React.FC<GrammarPatternCheckboxProps> = ({ 
   pattern, 
   isKnown, 
@@ -137,10 +163,11 @@ const GrammarPatternCheckbox: React.FC<GrammarPatternCheckboxProps> = ({
     </div>
   );
 };
+*/
 
 // Utility: Flatten backend grammar overview into simple arrays
 const TOTAL_GRAMMAR_PATTERNS = 41; // Total grammar patterns (A1:6 + A2:8 + B1:8 + B2:10 + C1:5 + C2:4)
-const aggregateGrammarOverview = (overviewData: any) => {
+const aggregateGrammarOverview = (overviewData: GrammarOverview | undefined) => {
   if (!overviewData || !overviewData.overview) {
     return {
       known_patterns: [] as string[],
@@ -149,7 +176,7 @@ const aggregateGrammarOverview = (overviewData: any) => {
     };
   }
 
-  const levelEntries = Object.values(overviewData.overview) as any[];
+  const levelEntries = Object.values(overviewData.overview) as GrammarOverviewLevel[];
 
   const knownSet = new Set<string>();
   levelEntries.forEach((lvl) => (lvl.known || []).forEach((p: string) => knownSet.add(p)));
@@ -165,18 +192,14 @@ const aggregateGrammarOverview = (overviewData: any) => {
 
 export default function UserLevelDashboard({ userId, refreshTrigger }: UserLevelDashboardProps) {
   const [levelData, setLevelData] = useState<UserLevelResponse['data'] | null>(null);
-  const [dashboardData, setDashboardData] = useState<any>(null);
+  const [dashboardData, setDashboardData] = useState<DashboardData | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
 
   // Aggregated overview (flattened for easier access)
   const aggregatedOverview = useMemo(() => aggregateGrammarOverview(dashboardData?.grammar_overview), [dashboardData]);
 
-  useEffect(() => {
-    fetchData();
-  }, [userId, refreshTrigger]);
-
-  const fetchData = async () => {
+  const fetchData = useCallback(async () => {
     setLoading(true);
     setError(null);
 
@@ -198,19 +221,25 @@ export default function UserLevelDashboard({ userId, refreshTrigger }: UserLevel
       if (!hasAnySuccess) {
         setError('Kullanıcı bilgisi alınamadı');
       }
-    } catch (err) {
+    } catch (error) {
+      console.error('Fetch data error:', error);
       setError('Bağlantı hatası');
     } finally {
       setLoading(false);
     }
-  };
+  }, [userId]);
 
-  // Handle grammar status change and refresh data
+  useEffect(() => {
+    fetchData();
+  }, [fetchData, refreshTrigger]);
+
+  // Handle grammar status change and refresh data (currently unused)
+  /*
   const onGrammarStatusChange = async (pattern: string, isKnown: boolean) => {
     // Remember scroll position to prevent jump
     const currentScroll = window.scrollY;
     // Optimistically update UI
-    setDashboardData((prev: any) => {
+    setDashboardData((prev: DashboardData | null) => {
       if (!prev) return prev;
       const newOverview = { ...prev.grammar_overview };
       if (isKnown) {
@@ -224,14 +253,17 @@ export default function UserLevelDashboard({ userId, refreshTrigger }: UserLevel
         newOverview.practice_patterns = [...new Set([...(newOverview.practice_patterns || []), pattern])];
         newOverview.known_patterns = (newOverview.known_patterns || []).filter((p: string) => p !== pattern);
       }
-      return { ...prev, grammar_overview: newOverview } as any;
+      return { ...prev, grammar_overview: newOverview };
     });
     
     // Call backend
     await fetchData();
     window.scrollTo({ top: currentScroll });
   };
+  */
 
+  // Currently unused function - kept for future use
+  /*
   const getLevelColor = (level: string) => {
     switch (level.toLowerCase()) {
       case 'a1': return 'bg-green-500';
@@ -243,6 +275,7 @@ export default function UserLevelDashboard({ userId, refreshTrigger }: UserLevel
       default: return 'bg-gray-500';
     }
   };
+  */
 
   const getLevelGradient = (level: string) => {
     switch (level.toLowerCase()) {

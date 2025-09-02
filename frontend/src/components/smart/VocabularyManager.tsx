@@ -1,6 +1,6 @@
 'use client';
 
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useCallback } from 'react';
 import WordExplanationPopup from './WordExplanationPopup';
 
 interface VocabularyWord {
@@ -43,7 +43,7 @@ export default function VocabularyManager({ currentUser, onVocabularyUpdated }: 
     }
   }, [currentUser]);
 
-  const fetchVocabulary = async () => {
+  const fetchVocabulary = useCallback(async () => {
     try {
       setLoading(true);
       const token = localStorage.getItem('token');
@@ -84,7 +84,13 @@ export default function VocabularyManager({ currentUser, onVocabularyUpdated }: 
     } finally {
       setLoading(false);
     }
-  };
+  }, []);
+
+  useEffect(() => {
+    if (currentUser) {
+      fetchVocabulary();
+    }
+  }, [currentUser, fetchVocabulary]);
 
   const handleWordClick = (word: string, event: React.MouseEvent) => {
     const rect = event.currentTarget.getBoundingClientRect();
@@ -279,7 +285,7 @@ export default function VocabularyManager({ currentUser, onVocabularyUpdated }: 
         {['known', 'unknown', 'ignored'].map((tab) => (
           <button
             key={tab}
-            onClick={() => setActiveTab(tab as any)}
+            onClick={() => setActiveTab(tab as 'known' | 'unknown' | 'ignored')}
             className={`flex-1 flex items-center justify-center gap-2 py-3 px-4 rounded-md font-medium transition-all duration-200 ${
               activeTab === tab 
                 ? `bg-gray-700 ${getTabColor(tab)}` 
@@ -317,7 +323,7 @@ export default function VocabularyManager({ currentUser, onVocabularyUpdated }: 
             <span className="text-gray-300 text-sm font-medium">📊 Sırala:</span>
             <select
               value={sortOrder}
-              onChange={(e) => setSortOrder(e.target.value as any)}
+              onChange={(e) => setSortOrder(e.target.value as 'asc' | 'desc')}
               className="bg-gray-700 text-white px-3 py-2 rounded-lg border border-gray-600 focus:border-blue-500 focus:outline-none"
             >
               <option value="asc">A → Z</option>
@@ -358,7 +364,7 @@ export default function VocabularyManager({ currentUser, onVocabularyUpdated }: 
             <span className="text-gray-400 text-sm">Aktif filtreler:</span>
             {searchTerm && (
               <span className="bg-blue-600 text-white text-xs px-2 py-1 rounded-full">
-                🔍 "{searchTerm}"
+                🔍 &quot;{searchTerm}&quot;
               </span>
             )}
             {sortOrder !== 'asc' && (
@@ -399,7 +405,7 @@ export default function VocabularyManager({ currentUser, onVocabularyUpdated }: 
             <div className="text-4xl mb-4">📝</div>
             {searchTerm ? (
               <>
-                <p>"{searchTerm}" aramasına uygun kelime bulunamadı.</p>
+                <p>&quot;{searchTerm}&quot; aramasına uygun kelime bulunamadı.</p>
                 <p className="text-sm mt-2">Farklı kelimeler aramayı deneyin!</p>
               </>
             ) : (

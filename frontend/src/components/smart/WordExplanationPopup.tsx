@@ -1,6 +1,6 @@
 'use client';
 
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useCallback } from 'react';
 import { SmartAPI } from './api';
 import { WordExplanationResponse } from './types';
 
@@ -17,7 +17,7 @@ export default function WordExplanationPopup({
   word,
   isOpen,
   onClose,
-  position = { x: 0, y: 0 },
+  position: _position = { x: 0, y: 0 }, // Renamed to avoid unused variable warning
   currentUser,
   onVocabularyAdded
 }: WordExplanationPopupProps) {
@@ -29,37 +29,67 @@ export default function WordExplanationPopup({
   const [wordStatus, setWordStatus] = useState<string | null>(null); // Kelimenin mevcut durumu
   const [userId, setUserId] = useState<number | null>(null); // Dynamic user ID
 
+  const fetchUserId = useCallback(async () => {
+    try {
+      const response = await fetch(`http://localhost:8000/api/auth/user-id/${currentUser}`);
+      
+      if (response.ok) {
+        const data = await response.json();
+        setUserId(data.user_id);
+      } else {
+        console.error('User ID alınamadı');
+      }
+    } catch (error) {
+      console.error('User ID fetch error:', error);
+    }
+  }, [currentUser]);
+
+  const fetchWordExplanation = useCallback(async () => {
+    if (!word || !userId) return;
+    
+    setLoading(true);
+    try {
+      const result = await SmartAPI.getWordExplanation(word);
+      if (result.success) {
+        setExplanation(result.data);
+      } else {
+        console.error('Failed to fetch explanation:', result.message);
+      }
+    } catch (error) {
+      console.error('Error fetching explanation:', error);
+    } finally {
+      setLoading(false);
+    }
+  }, [word, userId]);
+
+  const fetchWordStatus = useCallback(async () => {
+    if (!word || !userId) return;
+    
+    try {
+      const result = await SmartAPI.getVocabularyStatus(userId, word);
+      if (result.success) {
+        setWordStatus(result.data?.status || null);
+      }
+    } catch (error) {
+      console.error('Error fetching word status:', error);
+    }
+  }, [word, userId]);
+
   useEffect(() => {
     if (isOpen && word && currentUser) {
       setWordStatus(null); // Reset status
       fetchUserId(); // Get user ID first
     }
-  }, [isOpen, word, currentUser]);
+  }, [isOpen, word, currentUser, fetchUserId]);
 
   useEffect(() => {
     if (isOpen && word && userId) {
       fetchWordExplanation();
       fetchWordStatus(); // Kelimenin mevcut durumunu da kontrol et
     }
-  }, [isOpen, word, userId]);
+  }, [isOpen, word, userId, fetchWordExplanation, fetchWordStatus]);
 
-  const fetchUserId = async () => {
-    try {
-      const response = await fetch(`http://localhost:8000/api/auth/user-id/${currentUser}`);
-      
-      if (response.ok) {
-        const data = await response.json();
-        
-        // Try different possible response formats
-        const userIdValue = data.user_id || data.id || data.userId || data;
-        setUserId(userIdValue);
-      }
-    } catch (error) {
-      console.error('Error fetching user ID:', error);
-    }
-  };
-
-  const fetchWordStatus = async () => {
+  const fetchWordStatusDirect = async () => {
     if (!userId || !word) return;
     
     try {
@@ -89,25 +119,6 @@ export default function WordExplanationPopup({
     } catch (err) {
       console.log('[DEBUG] Word status check failed:', err);
       setWordStatus(null);
-    }
-  };
-
-  const fetchWordExplanation = async () => {
-    setLoading(true);
-    setError(null);
-    
-    try {
-      const response = await SmartAPI.getWordExplanation(word);
-      
-      if (response.success) {
-        setExplanation(response.data);
-      } else {
-        setError(response.error || 'Açıklama alınamadı');
-      }
-    } catch (err) {
-      setError('Bağlantı hatası');
-    } finally {
-      setLoading(false);
     }
   };
 
@@ -143,7 +154,9 @@ export default function WordExplanationPopup({
                           status === 'unknown' ? 'öğrenme' : 
                           status === 'ignore' ? 'görmezden gelinen kelimeler' : 'bilinmeyen';
                           
-        let message = `"${word}" kelimesi ${statusText} listesine eklendi!`;
+        let message = `&quot;${word}&quot; kelimesi ${statusText} listesine eklendi!`;
+        // Currently unused variable - kept for future use
+        // const _message = message;
         
         // Status'u güncelle
         setWordStatus(status);
@@ -222,7 +235,7 @@ export default function WordExplanationPopup({
         {/* Header */}
         <div className="flex items-center justify-between p-4 border-b border-gray-600">
           <h3 className="text-lg font-semibold text-blue-400">
-            📝 Kelime Açıklaması: "{word}"
+            📝 Kelime Açıklaması: &quot;{word}&quot;
           </h3>
           <button
             onClick={onClose}
@@ -282,7 +295,7 @@ export default function WordExplanationPopup({
                 <div className="mb-4">
                   <h4 className="font-medium text-teal-400 mb-2">🇬🇧 İngilizce Örnek:</h4>
                   <p className="text-gray-200 italic">
-                    "{explanation.english_example}"
+                    &quot;{explanation.english_example}&quot;
                   </p>
                 </div>
 
