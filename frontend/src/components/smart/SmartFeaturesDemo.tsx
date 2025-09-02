@@ -79,7 +79,7 @@ export default function SmartFeaturesDemo({ username, initialText }: SmartFeatur
   const [analysisLoading, setAnalysisLoading] = useState(false);
   
   // Handle grammar marked callback
-  const handleGrammarMarked = useCallback((pattern: string, status: string, newLevel?: any) => {
+  const handleGrammarMarked = useCallback((pattern: string, status: string, newLevel?: { level: string; score: number }) => {
     console.log(`Grammar pattern ${pattern} marked as ${status}`, newLevel);
   }, []);
   
@@ -120,7 +120,8 @@ export default function SmartFeaturesDemo({ username, initialText }: SmartFeatur
           const knownPatterns = new Set<string>();
           
           // Extract known patterns from all levels
-          Object.values(overview).forEach((level: any) => {
+          Object.values(overview).forEach((value: unknown) => {
+            const level = value as { known?: string[]; learning?: string[]; needs_review?: string[] };
             if (level.known) {
               level.known.forEach((pattern: string) => knownPatterns.add(pattern));
             }
@@ -181,7 +182,8 @@ export default function SmartFeaturesDemo({ username, initialText }: SmartFeatur
               const overview = grammarData.data.overview;
               const knownPatterns = new Set<string>();
               
-              Object.values(overview).forEach((level: any) => {
+              Object.values(overview).forEach((value: unknown) => {
+                const level = value as { known?: string[]; learning?: string[]; needs_review?: string[] };
                 if (level.known) {
                   level.known.forEach((pattern: string) => knownPatterns.add(pattern));
                 }
@@ -303,7 +305,7 @@ export default function SmartFeaturesDemo({ username, initialText }: SmartFeatur
           <div className="bg-gradient-to-r from-blue-600 to-purple-600 text-white rounded-lg p-6">
             <h1 className="text-3xl font-bold mb-2">🚀 Smart AI Features Demo</h1>
             <p className="text-blue-100">
-              Yeni AI öğretmen sistemi, kelime cache'leme ve kullanıcı seviye takibi özellikleri.
+              Yeni AI öğretmen sistemi, kelime cache&apos;leme ve kullanıcı seviye takibi özellikleri.
             </p>
           </div>
           
@@ -331,7 +333,7 @@ export default function SmartFeaturesDemo({ username, initialText }: SmartFeatur
         <div className="bg-gradient-to-r from-blue-600 to-purple-600 text-white rounded-lg p-6">
           <h1 className="text-3xl font-bold mb-2">🚀 Smart AI Features Demo</h1>
           <p className="text-blue-100">
-            Yeni AI öğretmen sistemi, kelime cache'leme ve kullanıcı seviye takibi özellikleri.
+            Yeni AI öğretmen sistemi, kelime cache&apos;leme ve kullanıcı seviye takibi özellikleri.
           </p>
         </div>
 
@@ -343,7 +345,7 @@ export default function SmartFeaturesDemo({ username, initialText }: SmartFeatur
             <div className="w-full lg:w-1/2">
               <h2 className="text-2xl font-semibold mb-4 flex items-center gap-2">
                 <span className="text-2xl">📊</span>
-                Kullanıcı Seviye Dashboard'u
+                Kullanıcı Seviye Dashboard&apos;u
               </h2>
               <UserLevelDashboard 
                 userId={userId || 0} 

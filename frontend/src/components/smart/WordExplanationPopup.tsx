@@ -276,7 +276,7 @@ export default function WordExplanationPopup({
                 </span>
                 {explanation.from_cache && (
                   <span className="px-2 py-1 bg-gray-700 text-gray-300 rounded-full text-xs border border-gray-600">
-                    📚 Cache'den
+                    📚 Cache&apos;den
                   </span>
                 )}
               </div>
@@ -368,7 +368,7 @@ export default function WordExplanationPopup({
               {/* Debug info */}
               {process.env.NODE_ENV === 'development' && (
                 <div className="text-xs text-gray-400 text-center">
-                  Debug: wordStatus = "{wordStatus}"
+                  Debug: wordStatus = &quot;{wordStatus}&quot;
                 </div>
               )}
               

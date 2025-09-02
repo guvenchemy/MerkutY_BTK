@@ -3,14 +3,13 @@
 import React, { useState } from 'react';
 import { SmartAPI } from './api';
 import { GrammarExplanation } from './types';
-import dynamic from 'next/dynamic';
-// @ts-ignore
-import robotoNormalBase64 from './fonts/Roboto-Regular-normal.js';
+// import dynamic from 'next/dynamic'; // Currently unused
+// import robotoNormalBase64 from '../../config/fonts'; // Currently unused
 
 interface SmartGrammarExplanationProps {
   explanations: GrammarExplanation[];
   userId: number;
-  onGrammarMarked?: (pattern: string, status: 'known' | 'practice', newLevel?: any) => void;
+  onGrammarMarked?: (pattern: string, status: 'known' | 'practice', newLevel?: { level: string; score: number }) => void;
 }
 
 export default function SmartGrammarExplanation({
@@ -58,7 +57,11 @@ export default function SmartGrammarExplanation({
       const response = await SmartAPI.markGrammarKnowledge(userId, pattern, status);
       
       if (response.success) {
-        onGrammarMarked?.(pattern, status, response.data.updated_level);
+        const levelData = {
+          level: response.data.updated_level.user_level?.level || 'A1',
+          score: response.data.updated_level.scores?.total_score || 0
+        };
+        onGrammarMarked?.(pattern, status, levelData);
       }
     } catch (error) {
       console.error('Error marking grammar:', error);
@@ -108,7 +111,6 @@ export default function SmartGrammarExplanation({
     if (!explanations || explanations.length === 0) return;
     
     try {
-      // @ts-ignore
       const { default: jsPDF } = await import('jspdf');
       const doc = new jsPDF({
         orientation: 'p',
@@ -287,7 +289,7 @@ export default function SmartGrammarExplanation({
                 Metindeki örnekler:
               </p>
               {typeof explanation.example_from_text === 'string' ? (
-                <p className="text-sm text-gray-700">"{explanation.example_from_text}"</p>
+                <p className="text-sm text-gray-700">&quot;{explanation.example_from_text}&quot;</p>
               ) : Array.isArray(explanation.example_from_text) ? (
                 <div className="space-y-2">
                   {explanation.example_from_text.map((example, idx) => {
@@ -298,7 +300,7 @@ export default function SmartGrammarExplanation({
                     if (typeof example === 'string') {
                       return (
                         <p key={idx} className="text-gray-700">
-                          <span className="font-medium">Örnek {idx + 1}:</span> "{example}"
+                          <span className="font-medium">Örnek {idx + 1}:</span> &quot;{example}&quot;
                         </p>
                       );
                     } else if (example && typeof example === 'object') {
@@ -423,10 +425,10 @@ export default function SmartGrammarExplanation({
                 <h5 className="font-medium text-pink-800 mb-3">🎯 Pratik Sorusu:</h5>
                 <div className="space-y-3">
                   <p className="text-gray-700 font-medium">
-                    Aşağıdaki cümleyi Türkçe'ye çevirin:
+                    Aşağıdaki cümleyi Türkçe&apos;ye çevirin:
                   </p>
                   <div className="bg-white p-3 rounded border-2 border-pink-200">
-                    <p className="italic text-gray-800">"{explanation.quiz_question}"</p>
+                    <p className="italic text-gray-800">&quot;{explanation.quiz_question}&quot;</p>
                   </div>
                   
                   <div className="flex gap-2">
@@ -442,7 +444,7 @@ export default function SmartGrammarExplanation({
                   {showQuizAnswers.has(explanation.pattern_name) && (
                     <div className="bg-green-100 p-3 rounded border border-green-200">
                       <p className="font-medium text-green-800 mb-1">✅ Doğru Cevap:</p>
-                      <p className="text-gray-800">"{explanation.hidden_answer}"</p>
+                      <p className="text-gray-800">&quot;{explanation.hidden_answer}&quot;</p>
                     </div>
                   )}
                 </div>
