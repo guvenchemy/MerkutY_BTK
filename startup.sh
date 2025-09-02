@@ -174,15 +174,14 @@ fi
 # Backend dizinine geç
 cd "$BACKEND_DIR"
 
-# .env yoksa container env'den üret
-if [ ! -f ".env" ]; then
-  echo "⚙️ .env oluşturuluyor..."
-  cat > .env <<EOT
+# .env dosyasını her zaman yeniden oluştur (container ortamı için)
+echo "⚙️ .env oluşturuluyor..."
+cat > .env <<EOT
 DATABASE_URL=${DATABASE_URL}
 GOOGLE_API_KEY=${GOOGLE_API_KEY}
 SECRET_KEY=${SECRET_KEY}
+ALLOWED_ORIGINS=${ALLOWED_ORIGINS:-http://localhost:3000,http://127.0.0.1:3000,http://172.19.0.2:3000,http://www.yilmaz.wtf,https://www.yilmaz.wtf}
 EOT
-fi
 
 echo "🐍 Python ve pip sürümleri kontrol ediliyor..."
 python -V || true

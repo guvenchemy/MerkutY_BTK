@@ -7,7 +7,7 @@ import {
   GrammarDashboardResponse 
 } from './types';
 
-const API_BASE_URL = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:8000';
+const API_BASE_URL = process.env.NEXT_PUBLIC_API_URL || 'http://172.19.0.3:8000';
 
 // Smart API Functions
 export class SmartAPI {
