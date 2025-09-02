@@ -65,14 +65,15 @@ export default function WordExplanationPopup({
   const fetchWordStatus = useCallback(async () => {
     if (!word || !userId) return;
     
-    try {
-      const result = await SmartAPI.getVocabularyStatus(userId, word);
-      if (result.success) {
-        setWordStatus(result.data?.status || null);
-      }
-    } catch (error) {
-      console.error('Error fetching word status:', error);
-    }
+    // TODO: Implement vocabulary status API
+    // try {
+    //   const result = await SmartAPI.getVocabularyStatus(userId, word);
+    //   if (result.success) {
+    //     setWordStatus(result.data?.status || null);
+    //   }
+    // } catch (error) {
+    //   console.error('Error fetching word status:', error);
+    // }
   }, [word, userId]);
 
   useEffect(() => {
@@ -89,38 +90,38 @@ export default function WordExplanationPopup({
     }
   }, [isOpen, word, userId, fetchWordExplanation, fetchWordStatus]);
 
-  const fetchWordStatusDirect = async () => {
-    if (!userId || !word) return;
-    
-    try {
-      // Kullanıcının bu kelimeye sahip olup olmadığını kontrol et
-      const response = await fetch(`http://localhost:8000/api/text-analysis/word-status`, {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-        },
-        body: JSON.stringify({
-          user_id: userId, // Use dynamic user ID
-          word: word
-        }),
-      });
+  // const fetchWordStatusDirect = async () => {
+  //   if (!userId || !word) return;
+  //   
+  //   try {
+  //     // Kullanıcının bu kelimeye sahip olup olmadığını kontrol et
+  //     const response = await fetch(`http://localhost:8000/api/text-analysis/word-status`, {
+  //       method: 'POST',
+  //       headers: {
+  //         'Content-Type': 'application/json',
+  //       },
+  //       body: JSON.stringify({
+  //         user_id: userId, // Use dynamic user ID
+  //         word: word
+  //       }),
+  //     });
 
-      if (response.ok) {
-        const result = await response.json();
-        
-        if (result.success && result.status) {
-          setWordStatus(result.status);
-        } else {
-          setWordStatus(null); // Kelime henüz eklenmemiş
-        }
-      } else {
-        console.log('[DEBUG] Word status request failed:', response.status);
-      }
-    } catch (err) {
-      console.log('[DEBUG] Word status check failed:', err);
-      setWordStatus(null);
-    }
-  };
+  //     if (response.ok) {
+  //       const result = await response.json();
+  //       
+  //       if (result.success && result.status) {
+  //         setWordStatus(result.status);
+  //       } else {
+  //         setWordStatus(null); // Kelime henüz eklenmemiş
+  //       }
+  //     } else {
+  //       console.log('[DEBUG] Word status request failed:', response.status);
+  //     }
+  //   } catch (err) {
+  //     console.log('[DEBUG] Word status check failed:', err);
+  //     setWordStatus(null);
+  //   }
+  // };
 
   const addToVocabulary = async (status: 'known' | 'unknown' | 'learning' | 'ignore') => {
     console.log('🚀 WordExplanationPopup.addToVocabulary called with status:', status);
