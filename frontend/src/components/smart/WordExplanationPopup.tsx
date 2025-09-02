@@ -53,7 +53,7 @@ export default function WordExplanationPopup({
       if (result.success) {
         setExplanation(result.data);
       } else {
-        console.error('Failed to fetch explanation:', result.message);
+        console.error('Failed to fetch explanation:', result.error);
       }
     } catch (error) {
       console.error('Error fetching explanation:', error);
