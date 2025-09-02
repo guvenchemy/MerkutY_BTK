@@ -34,18 +34,65 @@ def upgrade() -> None:
     )
 
     # Add new columns if not exist
-    # word_count
-    op.add_column('url_content', sa.Column('word_count', sa.Integer(), server_default='0', nullable=False))
-    # added_by_user_id
-    op.add_column('url_content', sa.Column('added_by_user_id', sa.Integer(), nullable=True))
-
-    # Create FK to users
-    op.create_foreign_key(
-        'fk_url_content_user', 'url_content', 'users', ['added_by_user_id'], ['id'], ondelete='SET NULL'
+    # word_count - check if column exists first
+    op.execute(
+        """
+        DO $$
+        BEGIN
+            IF NOT EXISTS (
+                SELECT 1 FROM information_schema.columns 
+                WHERE table_name = 'url_content' AND column_name = 'word_count'
+            ) THEN
+                ALTER TABLE url_content ADD COLUMN word_count INTEGER DEFAULT 0 NOT NULL;
+            END IF;
+        END$$;
+        """
+    )
+    
+    # added_by_user_id - check if column exists first
+    op.execute(
+        """
+        DO $$
+        BEGIN
+            IF NOT EXISTS (
+                SELECT 1 FROM information_schema.columns 
+                WHERE table_name = 'url_content' AND column_name = 'added_by_user_id'
+            ) THEN
+                ALTER TABLE url_content ADD COLUMN added_by_user_id INTEGER;
+            END IF;
+        END$$;
+        """
     )
 
-    # Create composite unique constraint
-    op.create_unique_constraint('uq_urlcontent_url_user', 'url_content', ['url', 'added_by_user_id'])
+    # Create FK to users if not exists
+    op.execute(
+        """
+        DO $$
+        BEGIN
+            IF NOT EXISTS (
+                SELECT 1 FROM pg_constraint WHERE conname = 'fk_url_content_user'
+            ) THEN
+                ALTER TABLE url_content ADD CONSTRAINT fk_url_content_user 
+                FOREIGN KEY (added_by_user_id) REFERENCES users(id) ON DELETE SET NULL;
+            END IF;
+        END$$;
+        """
+    )
+
+    # Create composite unique constraint if not exists
+    op.execute(
+        """
+        DO $$
+        BEGIN
+            IF NOT EXISTS (
+                SELECT 1 FROM pg_constraint WHERE conname = 'uq_urlcontent_url_user'
+            ) THEN
+                ALTER TABLE url_content ADD CONSTRAINT uq_urlcontent_url_user 
+                UNIQUE (url, added_by_user_id);
+            END IF;
+        END$$;
+        """
+    )
 
 
 def downgrade() -> None:
