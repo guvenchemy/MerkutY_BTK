@@ -84,4 +84,4 @@ Thumbs.db
 .env.production
 .env.staging
 config/secrets.py
-secrets.json 
+secrets.json backend/venv_new/

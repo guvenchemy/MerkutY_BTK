@@ -345,7 +345,7 @@ async def get_web_content(
                 "created_at": content.created_at.isoformat() if content.created_at else None,
                 "video_id": None,  # For compatibility with transcript interface
                 "original_text": content.content,
-                "adapted_text": None,  # Web content doesn't have adapted version in UrlContent
+                "adapted_text": None,
                 # CEFR level data
                 "cefr_level": content.cefr_level,
                 "level_confidence": content.level_confidence,
@@ -373,14 +373,13 @@ async def get_all_content(
     """
     try:
         # Get transcripts
-        # Get transcripts directly from service
         transcript_service = TranscriptLibraryService()
-        transcript_response = transcript_service.get_transcripts(
-            user_id=current_user.id,
+        transcripts = transcript_service.get_library_transcripts(
+            db=db,
             limit=limit//2,
-            offset=offset//2
+            offset=offset//2,
+            username=None
         )
-        transcripts = transcript_response.get("data", [])
         
         # Get web content
         web_response = await get_web_content(limit=limit//2, offset=offset//2, db=db)
@@ -389,17 +388,14 @@ async def get_all_content(
         # Combine and sort by created_at
         all_content = []
         
-        # Add transcripts with type marker
         for transcript in transcripts:
             transcript["content_type"] = "youtube"
             all_content.append(transcript)
         
-        # Add web content with type marker
         for content in web_contents:
             content["content_type"] = "web"
             all_content.append(content)
         
-        # Sort by created_at descending
         all_content.sort(key=lambda x: x.get("created_at", ""), reverse=True)
         
         return {
@@ -408,7 +404,7 @@ async def get_all_content(
         }
         
     except Exception as e:
-        return {"success": False, "error": f"Failed to get all content: {str(e)}"} 
+        return {"success": False, "error": f"Failed to get all content: {str(e)}"}
 
 @router.get("/web-content/{content_id}")
 async def get_web_content_detail(
@@ -460,9 +456,16 @@ async def get_web_content(
                 "id": content.id,
                 "title": content.title,
                 "url": content.url,
-                "word_count": len(content.content.split()) if content.content else 0,
-                "created_at": content.created_at.isoformat(),
-                "content_type": "web"
+                "content": content.content,
+                "word_count": content.word_count if content.word_count is not None else (len(content.content.split()) if content.content else 0),
+                "created_at": content.created_at.isoformat() if content.created_at else None,
+                "content_type": "web",
+                # Source type and CEFR fields
+                "source_type": content.source_type,
+                "cefr_level": content.cefr_level,
+                "level_confidence": content.level_confidence,
+                "level_analysis": content.level_analysis,
+                "level_analyzed_at": content.level_analyzed_at.isoformat() if content.level_analyzed_at else None
             })
         
         return {
@@ -562,25 +565,35 @@ async def get_or_create_web_content(
 @router.post("/library/analyze-levels")
 async def analyze_transcript_levels(
     library_service: TranscriptLibraryService = Depends(get_library_service),
-    db: Session = Depends(get_db)
+    db: Session = Depends(get_db),
+    force: bool = False,
+    fallback: bool = False
 ):
     """
-    Analyze CEFR levels for all transcripts and web content that don't have level data.
+    Analyze CEFR levels for all transcripts and web content.
+    - force=True: re-analyze all items; otherwise only items missing CEFR.
+    - fallback=True: allow heuristic fallback when AI fails; otherwise do not update on failure.
     """
     try:
         from app.models.user_vocabulary import ProcessedTranscript
         from app.models.content_models import UrlContent
         from app.services.ai_text_adaptation_service import AITextAdaptationService
         
-        # Get transcripts without CEFR level data
-        transcripts = db.query(ProcessedTranscript).filter(
-            ProcessedTranscript.cefr_level == None
-        ).all()
+        # Get transcripts depending on force flag
+        if force:
+            transcripts = db.query(ProcessedTranscript).all()
+        else:
+            transcripts = db.query(ProcessedTranscript).filter(
+                ProcessedTranscript.cefr_level == None
+            ).all()
         
-        # Get web content without CEFR level data
-        web_contents = db.query(UrlContent).filter(
-            UrlContent.cefr_level == None
-        ).all()
+        # Get web content depending on force flag
+        if force:
+            web_contents = db.query(UrlContent).all()
+        else:
+            web_contents = db.query(UrlContent).filter(
+                UrlContent.cefr_level == None
+            ).all()
         
         total_items = len(transcripts) + len(web_contents)
         
@@ -597,17 +610,13 @@ async def analyze_transcript_levels(
         # Analyze transcripts
         for transcript in transcripts:
             try:
-                # Analyze CEFR level
-                cefr_result = ai_service.detect_cefr_level(transcript.original_text)
-                
-                # Update transcript with CEFR data
-                transcript.cefr_level = cefr_result.get("cefr_level", "B1")
-                transcript.level_confidence = cefr_result.get("confidence", 50)
-                transcript.level_analysis = cefr_result.get("analysis", "AI analysis completed")
-                transcript.level_analyzed_at = func.now()
-                
-                analyzed_count += 1
-                
+                cefr_result = ai_service.detect_cefr_level(transcript.original_text, allow_fallback=fallback)
+                if cefr_result.get("success") and cefr_result.get("cefr_level"):
+                    transcript.cefr_level = cefr_result.get("cefr_level", transcript.cefr_level)
+                    transcript.level_confidence = cefr_result.get("confidence", transcript.level_confidence)
+                    transcript.level_analysis = cefr_result.get("analysis", transcript.level_analysis)
+                    transcript.level_analyzed_at = func.now()
+                    analyzed_count += 1
             except Exception as e:
                 logger.error(f"Error analyzing transcript {transcript.id}: {e}")
                 continue
@@ -615,17 +624,13 @@ async def analyze_transcript_levels(
         # Analyze web content
         for content in web_contents:
             try:
-                # Analyze CEFR level for web content
-                cefr_result = ai_service.detect_cefr_level(content.content)
-                
-                # Update web content with CEFR data
-                content.cefr_level = cefr_result.get("cefr_level", "B1")
-                content.level_confidence = cefr_result.get("confidence", 50)
-                content.level_analysis = cefr_result.get("analysis", "AI analysis completed")
-                content.level_analyzed_at = func.now()
-                
-                analyzed_count += 1
-                
+                cefr_result = ai_service.detect_cefr_level(content.content, allow_fallback=fallback)
+                if cefr_result.get("success") and cefr_result.get("cefr_level"):
+                    content.cefr_level = cefr_result.get("cefr_level", content.cefr_level)
+                    content.level_confidence = cefr_result.get("confidence", content.level_confidence)
+                    content.level_analysis = cefr_result.get("analysis", content.level_analysis)
+                    content.level_analyzed_at = func.now()
+                    analyzed_count += 1
             except Exception as e:
                 logger.error(f"Error analyzing web content {content.id}: {e}")
                 continue
@@ -638,7 +643,9 @@ async def analyze_transcript_levels(
             "analyzed_count": analyzed_count,
             "total_transcripts": len(transcripts),
             "total_web_content": len(web_contents),
-            "total_items": total_items
+            "total_items": total_items,
+            "forced": force,
+            "fallback": fallback
         }
         
     except Exception as e:
@@ -860,4 +867,47 @@ async def add_content_to_my_library(
         
     except Exception as e:
         logger.error(f"Error adding content to library: {e}")
+        return {"success": False, "error": str(e)}
+
+@router.get("/library/level-stats")
+async def get_level_stats(db: Session = Depends(get_db)):
+    """Return counts of CEFR levels determined by AI vs heuristic (fallback) for transcripts and web content."""
+    try:
+        from app.models.user_vocabulary import ProcessedTranscript
+        from app.models.content_models import UrlContent
+
+        HEUR_MARK = "Heuristic fallback based on length, avg sentence length, and complex-word ratio"
+
+        # Transcripts
+        total_transcripts = db.query(ProcessedTranscript).filter(ProcessedTranscript.cefr_level != None).count()
+        heuristic_transcripts = db.query(ProcessedTranscript).filter(ProcessedTranscript.level_analysis == HEUR_MARK).count()
+        ai_transcripts = max(0, total_transcripts - heuristic_transcripts)
+
+        # Web content
+        total_web = db.query(UrlContent).filter(UrlContent.cefr_level != None).count()
+        heuristic_web = db.query(UrlContent).filter(UrlContent.level_analysis == HEUR_MARK).count()
+        ai_web = max(0, total_web - heuristic_web)
+
+        return {
+            "success": True,
+            "data": {
+                "transcripts": {
+                    "total": total_transcripts,
+                    "ai": ai_transcripts,
+                    "heuristic": heuristic_transcripts,
+                },
+                "web_content": {
+                    "total": total_web,
+                    "ai": ai_web,
+                    "heuristic": heuristic_web,
+                },
+                "overall": {
+                    "total": total_transcripts + total_web,
+                    "ai": ai_transcripts + ai_web,
+                    "heuristic": heuristic_transcripts + heuristic_web,
+                }
+            }
+        }
+    except Exception as e:
+        logger.error(f"Error computing level stats: {e}")
         return {"success": False, "error": str(e)}

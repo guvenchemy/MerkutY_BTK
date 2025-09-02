@@ -121,7 +121,7 @@ export default function LibraryPage() {
       });
 
       // Fetch web content
-      const webContentResponse = await fetch('http://localhost:8000/api/web-content', {
+      const webContentResponse = await fetch('http://localhost:8000/api/library/web-content', {
         headers: {
           'Authorization': `Bearer ${token}`,
           'Content-Type': 'application/json',
@@ -590,13 +590,9 @@ export default function LibraryPage() {
                               <h3 className="font-medium text-gray-900 line-clamp-2 text-sm">
                                 {transcript.video_title || transcript.title}
                               </h3>
-                              {/* Content type indicator */}
-                              <span className={`px-2 py-1 rounded-full text-xs font-medium ${
-                                transcript.content_type === 'youtube' 
-                                  ? 'bg-red-100 text-red-800' 
-                                  : 'bg-blue-100 text-blue-800'
-                              }`}>
-                                {transcript.content_type === 'youtube' ? 'YT' : 'Web'}
+                              {/* Source label */}
+                              <span className={`px-2 py-1 rounded-full text-xs font-medium bg-gray-100 text-gray-800`}>
+                                {transcript.content_type === 'youtube' ? 'YouTube' : ((transcript.url || '').includes('medium.com') ? 'Medium' : ((transcript.url || '').includes('wikipedia.org') ? 'Wikipedia' : 'Web'))}
                               </span>
                             </div>
                             <p className="text-xs text-gray-600 mt-1">
@@ -604,9 +600,17 @@ export default function LibraryPage() {
                             </p>
                           </div>
                           <div className="ml-2 flex flex-col items-end">
-                            <span className="text-xs bg-blue-100 text-blue-800 px-2 py-1 rounded-full">
-                              {transcript.duration ? formatDuration(transcript.duration) : 'Web Article'}
-                            </span>
+                            <div className="flex gap-2">
+                              <span className="text-xs bg-blue-100 text-blue-800 px-2 py-1 rounded-full">
+                                {transcript.duration ? formatDuration(transcript.duration) : 'Web Article'}
+                              </span>
+                              {/* CEFR badge if available */}
+                              {'cefr_level' in transcript && (
+                                <span className="text-xs bg-green-100 text-green-800 px-2 py-1 rounded-full">
+                                  { (transcript as any).cefr_level || 'N/A' }
+                                </span>
+                              )}
+                            </div>
                           </div>
                         </div>
                         

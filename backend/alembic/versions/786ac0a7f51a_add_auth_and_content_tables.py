@@ -31,7 +31,8 @@ def upgrade() -> None:
     sa.PrimaryKeyConstraint('id')
     )
     op.create_index(op.f('ix_processed_transcripts_id'), 'processed_transcripts', ['id'], unique=False)
-    op.create_index(op.f('ix_processed_transcripts_video_id'), 'processed_transcripts', ['video_id'], unique=True)
+    # was unique before; will be managed later as composite unique (video_id, added_by_user_id)
+    op.create_index(op.f('ix_processed_transcripts_video_id'), 'processed_transcripts', ['video_id'], unique=False)
     op.create_table('url_content',
     sa.Column('id', sa.Integer(), nullable=False),
     sa.Column('url', sa.String(length=500), nullable=False),
@@ -43,7 +44,7 @@ def upgrade() -> None:
     sa.PrimaryKeyConstraint('id')
     )
     op.create_index(op.f('ix_url_content_id'), 'url_content', ['id'], unique=False)
-    op.create_index(op.f('ix_url_content_url'), 'url_content', ['url'], unique=True)
+    op.create_index(op.f('ix_url_content_url'), 'url_content', ['url'], unique=False)
     op.create_table('users',
     sa.Column('id', sa.Integer(), nullable=False),
     sa.Column('username', sa.String(length=50), nullable=False),

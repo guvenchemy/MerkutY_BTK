@@ -2,16 +2,22 @@ from sqlalchemy import Column, Integer, String, Text, DateTime, ForeignKey, Bool
 from sqlalchemy.orm import relationship
 from sqlalchemy.sql import func
 from app.core.database import Base
+from sqlalchemy import UniqueConstraint
 
 class UrlContent(Base):
     __tablename__ = "url_content"
+    __table_args__ = (
+        UniqueConstraint("url", "added_by_user_id", name="uq_urlcontent_url_user"),
+    )
     
     id = Column(Integer, primary_key=True, index=True)
-    url = Column(String(500), unique=True, nullable=False, index=True)
+    url = Column(String(500), unique=False, nullable=False, index=True)
     title = Column(String(255))
     content = Column(Text, nullable=False)
     source_type = Column(String(50))  # 'wikipedia', 'medium', 'youtube'
     video_id = Column(String(20))  # YouTube için
+    word_count = Column(Integer, default=0)  # Added for stats/filters
+    added_by_user_id = Column(Integer, ForeignKey("users.id"), nullable=True)
     created_at = Column(DateTime(timezone=True), server_default=func.now())
     
     # CEFR Level Analysis (NEW)
