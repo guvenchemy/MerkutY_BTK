@@ -24,19 +24,16 @@ class TextAdaptationRequest(BaseModel):
     target_unknown_percentage: Optional[float] = 10.0
 
 @router.post("/analyze")
-async def analyze_text_difficulty(request: TextAnalysisRequest) -> Dict:
+async def analyze_text_difficulty(request: TextAnalysisRequest, db: Session = Depends(get_db)) -> Dict:
     """
     Analyze text difficulty for a specific user.
     Returns breakdown of known vs unknown words.
     """
     try:
         # Get user's known words
-        from app.core.database import get_db
-        db = next(get_db())
         known_words = TextAdaptationService.get_user_known_words(request.username, db)
         
         if not known_words:
-            db.close()
             raise HTTPException(
                 status_code=404, 
                 detail=f"User '{request.username}' not found or has no vocabulary"
@@ -47,8 +44,6 @@ async def analyze_text_difficulty(request: TextAnalysisRequest) -> Dict:
         
         # Get word-by-word analysis for frontend coloring
         word_analysis = TextAdaptationService.get_word_analysis_for_coloring(request.text, known_words, request.username, db)
-        
-        db.close()
         
         # Add learning word suggestions
         learning_words = TextAdaptationService.identify_learning_words(request.text, request.username)
@@ -80,16 +75,12 @@ async def get_learning_suggestions(username: str, text: str) -> List[Dict]:
         raise HTTPException(status_code=500, detail=f"Failed to get learning suggestions: {str(e)}")
 
 @router.get("/user-stats/{username}")
-async def get_user_learning_stats(username: str) -> Dict:
+async def get_user_learning_stats(username: str, db: Session = Depends(get_db)) -> Dict:
     """
     Get user's learning statistics and vocabulary information.
     """
     try:
-        from app.core.database import get_db
         from app.models.user_vocabulary import User, UserVocabulary, Vocabulary
-        from sqlalchemy.orm import Session
-        
-        db = next(get_db())
         
         # Get user
         user = db.query(User).filter(User.username == username).first()
@@ -100,7 +91,6 @@ async def get_user_learning_stats(username: str) -> Dict:
             )
         
         # Get detailed vocabulary stats - Use user_id instead of username
-        # Get known words using user_id directly from database
         user_known_words = db.query(Vocabulary.word).join(UserVocabulary).filter(
             UserVocabulary.user_id == user.id,
             UserVocabulary.status == "known"
@@ -123,8 +113,6 @@ async def get_user_learning_stats(username: str) -> Dict:
             UserVocabulary.status == "ignore"
         ).count()
         
-        db.close()
-        
         # Use grammar hierarchy service for proper level calculation
         from app.services.grammar_hierarchy_service import GrammarHierarchyService
         grammar_service = GrammarHierarchyService()
@@ -133,7 +121,6 @@ async def get_user_learning_stats(username: str) -> Dict:
         # Get CEFR level and convert to user-friendly name
         cefr_level = level_info.get("user_level", {}).get("level", "A1")
         
-        # Convert CEFR to user-friendly level names
         if cefr_level in ["A1", "A2"]:
             level = "Beginner"
             level_score = 1 if cefr_level == "A1" else 2

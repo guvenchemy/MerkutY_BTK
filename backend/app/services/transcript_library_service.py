@@ -32,7 +32,7 @@ class TranscriptLibraryService:
             if not user:
                 return {"error": "User not found"}
             
-            # Check if transcript exists in user's own library
+            # 1) Check if transcript exists in user's own library
             own_transcript = db.query(ProcessedTranscript).filter(
                 ProcessedTranscript.video_id == video_id,
                 ProcessedTranscript.added_by_user_id == user.id
@@ -56,21 +56,50 @@ class TranscriptLibraryService:
                     "duration": own_transcript.duration,
                     "view_count": own_transcript.view_count,
                     "added_by": own_transcript.added_by_username,
-                    "message": "Zaten kütüphanende olan içerik kullanıldı"
+                    "cefr_level": own_transcript.cefr_level,
+                    "message": "Kütüphanenden yüklendi"
                 }
             
-            # Check if transcript exists in discover (other users' libraries)
+            # 2) Check if transcript exists in discover (other users' libraries)
             discover_transcript = db.query(ProcessedTranscript).filter(
                 ProcessedTranscript.video_id == video_id,
                 ProcessedTranscript.added_by_user_id != user.id
             ).first()
             
             if discover_transcript:
-                # Don't add to user's library, just return the info
+                # Create a personal copy for this user (dedup by composite unique)
+                existing_for_user = db.query(ProcessedTranscript).filter(
+                    ProcessedTranscript.video_id == video_id,
+                    ProcessedTranscript.added_by_user_id == user.id
+                ).first()
+                if not existing_for_user:
+                    new_copy = ProcessedTranscript(
+                        video_id=discover_transcript.video_id,
+                        video_url=discover_transcript.video_url,
+                        video_title=discover_transcript.video_title,
+                        channel_name=discover_transcript.channel_name,
+                        duration=discover_transcript.duration,
+                        original_text=discover_transcript.original_text,
+                        adapted_text=discover_transcript.adapted_text,
+                        language=discover_transcript.language,
+                        word_count=discover_transcript.word_count,
+                        adapted_word_count=discover_transcript.adapted_word_count,
+                        added_by_user_id=user.id,
+                        added_by_username=username,
+                        view_count=1,
+                        cefr_level=discover_transcript.cefr_level,
+                        level_confidence=discover_transcript.level_confidence,
+                        level_analysis=discover_transcript.level_analysis,
+                        level_analyzed_at=discover_transcript.level_analyzed_at
+                    )
+                    db.add(new_copy)
+                    db.commit()
+                    discover_transcript = new_copy
+                
                 return {
                     "success": True,
                     "from_library": True,
-                    "from_own_library": False,
+                    "from_own_library": True,
                     "from_discover": True,
                     "video_id": video_id,
                     "original_text": discover_transcript.original_text,
@@ -80,15 +109,11 @@ class TranscriptLibraryService:
                     "duration": discover_transcript.duration,
                     "view_count": discover_transcript.view_count,
                     "added_by": discover_transcript.added_by_username,
-                    "message": "Keşfet'ten bulunan içerik kullanıldı"
+                    "cefr_level": discover_transcript.cefr_level,
+                    "message": "Keşiften kişisel kopya oluşturuldu"
                 }
             
-            # Get user
-            user = db.query(User).filter(User.username == username).first()
-            if not user:
-                return {"error": "User not found"}
-            
-            # Fetch new transcript
+            # 3) Fetch new transcript
             transcript_result = self.youtube_service.get_transcript(video_id)
             if not transcript_result.get("success"):
                 return {"error": f"Failed to get transcript: {transcript_result.get('error', 'Unknown error')}"}
@@ -98,10 +123,10 @@ class TranscriptLibraryService:
             # Get video info
             video_info = self.youtube_service.get_video_info(video_id)
             
-            # CEFR Level Detection with AI
-            cefr_result = self.ai_service.detect_cefr_level(original_text)
+            # CEFR Level Detection with AI (no fallback)
+            cefr_result = self.ai_service.detect_cefr_level(original_text, allow_fallback=False)
             
-            # AI Text Adaptation
+            # AI Text Adaptation (current level approach)
             adapted_result = self.ai_service.adapt_text_with_ai(original_text, username, db, target_unknown_percentage=5.0)
             adapted_text = adapted_result.get("adapted_text", original_text)
             
@@ -121,9 +146,9 @@ class TranscriptLibraryService:
                 added_by_username=username,
                 view_count=1,
                 # CEFR Level fields
-                cefr_level=cefr_result.get("cefr_level", "B1"),
-                level_confidence=cefr_result.get("confidence", 50),
-                level_analysis=cefr_result.get("analysis", "AI analysis completed"),
+                cefr_level=cefr_result.get("cefr_level") if cefr_result.get("success") else None,
+                level_confidence=cefr_result.get("confidence") if cefr_result.get("success") else None,
+                level_analysis=cefr_result.get("analysis") if cefr_result.get("success") else None,
                 level_analyzed_at=db.execute(text("SELECT NOW()")).scalar()
             )
             
@@ -140,7 +165,8 @@ class TranscriptLibraryService:
                 "channel_name": new_transcript.channel_name,
                 "duration": new_transcript.duration,
                 "view_count": new_transcript.view_count,
-                "added_by": username
+                "added_by": username,
+                "cefr_level": new_transcript.cefr_level
             }
             
         except Exception as e:
@@ -162,10 +188,17 @@ class TranscriptLibraryService:
             
             transcripts = query.order_by(
                 ProcessedTranscript.view_count.desc()
-            ).offset(offset).limit(limit).all()
+            ).offset(offset).limit(limit * 2).all()  # overfetch then dedupe
             
-            return [
-                {
+            # Dedupe by video_id for discover lists (when username is None)
+            results: List[Dict[str, Any]] = []
+            seen_ids = set()
+            for t in transcripts:
+                key = t.video_id if not username else t.id  # discover → per video; personal → per row
+                if key in seen_ids:
+                    continue
+                seen_ids.add(key)
+                results.append({
                     "id": t.id,
                     "video_id": t.video_id,
                     "video_url": t.video_url,
@@ -178,14 +211,13 @@ class TranscriptLibraryService:
                     "view_count": t.view_count,
                     "added_by": t.added_by_username,
                     "created_at": t.created_at.isoformat() if t.created_at else None,
-                    # CEFR Level fields (NEW)
                     "cefr_level": t.cefr_level,
                     "level_confidence": t.level_confidence,
                     "level_analysis": t.level_analysis,
                     "level_analyzed_at": t.level_analyzed_at.isoformat() if t.level_analyzed_at else None
-                }
-                for t in transcripts
-            ]
+                })
+            
+            return results[:limit]
             
         except Exception as e:
             logger.error(f"Error getting library transcripts: {e}")
@@ -230,7 +262,6 @@ class TranscriptLibraryService:
     def search_transcripts(self, query: str, db: Session, limit: int = 20) -> List[Dict[str, Any]]:
         """Search transcripts by title, channel, or content."""
         try:
-            # Simple text search
             transcripts = db.query(ProcessedTranscript).filter(
                 ProcessedTranscript.is_active == True,
                 (
@@ -240,10 +271,15 @@ class TranscriptLibraryService:
                 )
             ).order_by(
                 ProcessedTranscript.view_count.desc()
-            ).limit(limit).all()
+            ).limit(limit * 2).all()
             
-            return [
-                {
+            results = []
+            seen = set()
+            for t in transcripts:
+                if t.video_id in seen:
+                    continue
+                seen.add(t.video_id)
+                results.append({
                     "id": t.id,
                     "video_id": t.video_id,
                     "video_title": t.video_title,
@@ -252,9 +288,9 @@ class TranscriptLibraryService:
                     "word_count": t.word_count,
                     "view_count": t.view_count,
                     "added_by": t.added_by_username
-                }
-                for t in transcripts
-            ]
+                })
+            
+            return results[:limit]
             
         except Exception as e:
             logger.error(f"Error searching transcripts: {e}")

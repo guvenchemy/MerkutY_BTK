@@ -3,15 +3,24 @@ import WordExplanationPopup from './smart/WordExplanationPopup';
 
 const levels = ['A1', 'A2', 'B1', 'B2', 'C1', 'C2'];
 
+// Helper to derive source label from content
+const getSourceLabel = (t: { content_type?: 'youtube' | 'web'; channel_name?: string; }): string => {
+  if (t.content_type === 'youtube') return 'YouTube';
+  const url = (t.channel_name || '').toLowerCase();
+  if (url.includes('medium.com')) return 'Medium';
+  if (url.includes('wikipedia.org')) return 'Wikipedia';
+  return 'Web';
+};
+
 // Transcript tipi - database schema'ya uygun
 interface Transcript {
   id: number;
-  video_id: string;
+  video_id: string | null;
   video_title: string;
   channel_name: string;
-  duration?: number;
-  original_text?: string;
-  adapted_text?: string;
+  duration?: number | null;
+  original_text?: string | null;
+  adapted_text?: string | null;
   language: string;
   word_count: number;
   adapted_word_count?: number;
@@ -774,6 +783,9 @@ const Library = ({ currentUser, userLevel }: LibraryProps) => {
                       {t.level_confidence}% confident
                     </span>
                   )}
+                  <span className="text-xs px-2 py-1 rounded-full font-bold bg-gray-600 text-white">
+                    {getSourceLabel(t)}
+                  </span>
                 </div>
                 <h4 className="font-semibold text-white mb-1 line-clamp-2">{t.video_title}</h4>
                 <div className="text-xs text-gray-300 mb-2">

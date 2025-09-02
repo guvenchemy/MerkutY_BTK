@@ -2,6 +2,7 @@ from sqlalchemy import Column, Integer, String, Boolean, DateTime, ForeignKey, T
 from sqlalchemy.orm import relationship
 from sqlalchemy.sql import func
 from app.core.database import Base
+from sqlalchemy import UniqueConstraint
 
 class User(Base):
     __tablename__ = "users"
@@ -54,9 +55,12 @@ class UserVocabulary(Base):
 # Additional model for storing transcripts to avoid re-processing
 class ProcessedTranscript(Base):
     __tablename__ = "processed_transcripts"
+    __table_args__ = (
+        UniqueConstraint("video_id", "added_by_user_id", name="uq_transcript_video_user"),
+    )
     
     id = Column(Integer, primary_key=True, index=True)
-    video_id = Column(String(20), index=True, nullable=False)  # YouTube video ID (removed unique constraint)
+    video_id = Column(String(20), index=True, nullable=False)  # YouTube video ID (per user uniqueness)
     video_url = Column(String(500), nullable=True)
     video_title = Column(String(500), nullable=True)
     channel_name = Column(String(200), nullable=True)

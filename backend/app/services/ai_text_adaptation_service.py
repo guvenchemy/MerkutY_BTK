@@ -4,7 +4,7 @@ from typing import List, Dict, Set
 from sqlalchemy.orm import Session
 from app.core.database import get_db
 from app.models.user_vocabulary import User, UserVocabulary, Vocabulary
-from app.models.user_grammar_knowledge import UserGrammarKnowledge
+from app.models.user_vocabulary import UserGrammarKnowledge
 from app.services.grammar_hierarchy_service import GrammarHierarchyService
 import logging
 import json
@@ -30,6 +30,7 @@ class AITextAdaptationService:
         genai.configure(api_key=api_key)
         self.client = genai.GenerativeModel('gemini-1.5-flash')
         self.grammar_service = GrammarHierarchyService()
+        self.demo_mode = False  # default off
     
     @staticmethod
     def get_user_known_words(username: str, db: Session) -> Set[str]:
@@ -689,7 +690,7 @@ Analyze the text and return the JSON response:"""
             # Hata durumunda sadece orijinal kelimeyi ekle
             logging.warning(f"Error in word variations for '{word}': {e}")
             pass 
-    def detect_cefr_level(self, text: str) -> Dict[str, any]:
+    def detect_cefr_level(self, text: str, allow_fallback: bool = False) -> Dict[str, any]:
         """
         🎯 CEFR LEVEL DETECTION using AI
         
@@ -771,20 +772,71 @@ RESPOND ONLY WITH THE JSON, NO OTHER TEXT."""
                 }
             except json.JSONDecodeError as e:
                 logger.error(f"JSON parsing error in CEFR detection: {e}")
-                return {
-                    "success": False,
-                    "error": "Failed to parse AI response",
-                    "cefr_level": "B1",
-                    "confidence": 50,
-                    "analysis": "Default analysis due to parsing error"
-                }
+                if allow_fallback:
+                    heur = self._heuristic_cefr(text)
+                    return {
+                        "success": True,
+                        "cefr_level": heur["cefr_level"],
+                        "confidence": heur["confidence"],
+                        "analysis": heur["analysis"],
+                        "vocabulary_level": heur["cefr_level"],
+                        "grammar_level": heur["cefr_level"],
+                        "sentence_complexity": heur["cefr_level"],
+                        "key_indicators": heur["key_indicators"],
+                        "word_count_estimate": heur["word_count_estimate"],
+                    }
+                return {"success": False, "error": "Failed to parse AI response", "cefr_level": None}
                 
         except Exception as e:
             logger.error(f"Error in CEFR level detection: {e}")
-            return {
-                "success": False,
-                "error": str(e),
-                "cefr_level": "B1", 
-                "confidence": 50,
-                "analysis": "Error occurred during analysis"
-            }
+            if allow_fallback:
+                heur = self._heuristic_cefr(text)
+                return {
+                    "success": True,
+                    "cefr_level": heur["cefr_level"],
+                    "confidence": heur["confidence"],
+                    "analysis": heur["analysis"],
+                    "vocabulary_level": heur["cefr_level"],
+                    "grammar_level": heur["cefr_level"],
+                    "sentence_complexity": heur["cefr_level"],
+                    "key_indicators": heur["key_indicators"],
+                    "word_count_estimate": heur["word_count_estimate"],
+                }
+            return {"success": False, "error": str(e), "cefr_level": None}
+
+    def _heuristic_cefr(self, text: str) -> Dict[str, any]:
+        """Lightweight fallback CEFR estimator using length, sentence length and complex-word ratio."""
+        clean = (text or "").strip()
+        words = clean.split()
+        num_words = len(words)
+        sentences = [s for s in clean.replace('?', '.').replace('!', '.').split('.') if s.strip()]
+        num_sent = max(1, len(sentences))
+        avg_words = num_words / num_sent
+        complex_words = sum(1 for w in words if len(w.strip('.,;:!?"\'()-')) >= 8)
+        complex_ratio = (complex_words / max(1, num_words))
+        clauses = sum(1 for w in words if w.lower() in {"although","however","therefore","moreover","whereas","nevertheless","furthermore","consequently","nonetheless","whereby","thereby"})
+        # Simple thresholds
+        level = "A1"
+        if num_words > 120 and avg_words > 10 and complex_ratio > 0.02:
+            level = "A2"
+        if num_words > 250 and avg_words > 12 and complex_ratio > 0.04:
+            level = "B1"
+        if num_words > 400 and avg_words > 14 and (complex_ratio > 0.06 or clauses >= 2):
+            level = "B2"
+        if num_words > 600 and avg_words > 16 and (complex_ratio > 0.09 or clauses >= 3):
+            level = "C1"
+        if num_words > 900 and avg_words > 18 and (complex_ratio > 0.12 or clauses >= 4):
+            level = "C2"
+        confidence = 55 if level in {"A1","A2"} else 65 if level in {"B1","B2"} else 70
+        return {
+            "cefr_level": level,
+            "confidence": confidence,
+            "analysis": "Heuristic fallback based on length, avg sentence length, and complex-word ratio",
+            "key_indicators": [
+                f"words={num_words}",
+                f"avg_words_per_sentence={avg_words:.1f}",
+                f"complex_word_ratio={complex_ratio:.2f}",
+                f"clausal_markers={clauses}"
+            ],
+            "word_count_estimate": num_words
+        }
