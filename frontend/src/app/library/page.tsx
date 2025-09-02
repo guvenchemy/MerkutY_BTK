@@ -4,6 +4,17 @@ import React, { useState, useEffect } from 'react';
 import { useRouter } from 'next/navigation';
 import WordExplanationPopup from '../../components/smart/WordExplanationPopup';
 
+interface TranscriptResponse {
+  content_type: string;
+  id: number;
+  title: string;
+  word_count: number;
+  cefr_level?: string;
+  created_at?: string;
+  url?: string;
+  transcript?: string;
+}
+
 interface Transcript {
   id: number;
   video_id?: string;
@@ -56,7 +67,7 @@ export default function LibraryPage() {
   const [isSearching, setIsSearching] = useState(false);
   const [filterMinWords, setFilterMinWords] = useState<number>(0);
   const [filterMaxWords, setFilterMaxWords] = useState<number>(0);
-  const [user, setUser] = useState<any>(null);
+  const [user, setUser] = useState<{ id: number; username: string } | null>(null);
   const [adaptedText, setAdaptedText] = useState<string>('');
   const [isAdapting, setIsAdapting] = useState(false);
   const [adaptedWordCount, setAdaptedWordCount] = useState<number>(0);
@@ -128,14 +139,14 @@ export default function LibraryPage() {
         },
       });
 
-      let allContent: any[] = [];
+      let allContent: TranscriptResponse[] = [];
 
       if (transcriptResponse.ok) {
         const transcriptData = await transcriptResponse.json();
         console.log('📺 YouTube transcripts response:', transcriptData);
         const transcripts = transcriptData.data || [];
         // Add content type marker
-        transcripts.forEach((transcript: any) => {
+        transcripts.forEach((transcript: TranscriptResponse) => {
           transcript.content_type = 'youtube';
         });
         allContent = [...allContent, ...transcripts];
@@ -149,7 +160,7 @@ export default function LibraryPage() {
         console.log('🌐 Web content response:', webData);
         const webContents = webData.data || [];
         // Add content type marker
-        webContents.forEach((content: any) => {
+        webContents.forEach((content: TranscriptResponse) => {
           content.content_type = 'web';
         });
         allContent = [...allContent, ...webContents];
@@ -159,13 +170,13 @@ export default function LibraryPage() {
       }
 
       // Sort by created_at descending
-      allContent.sort((a: any, b: any) => {
+      allContent.sort((a: TranscriptResponse, b: TranscriptResponse) => {
         const dateA = new Date(a.created_at || 0);
         const dateB = new Date(b.created_at || 0);
         return dateB.getTime() - dateA.getTime();
       });
 
-      setTranscripts(allContent);
+      setTranscripts(allContent as Transcript[]);
       
     } catch (error) {
       console.error('Error fetching content:', error);
@@ -607,7 +618,7 @@ export default function LibraryPage() {
                               {/* CEFR badge if available */}
                               {'cefr_level' in transcript && (
                                 <span className="text-xs bg-green-100 text-green-800 px-2 py-1 rounded-full">
-                                  { (transcript as any).cefr_level || 'N/A' }
+                                  { (transcript as TranscriptResponse).cefr_level || 'N/A' }
                                 </span>
                               )}
                             </div>

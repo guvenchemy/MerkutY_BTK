@@ -65,11 +65,12 @@ interface AdaptationResult {
   };
 }
 
-interface WordExplanation {
-  translation: string;
-  example: string;
-  example_explanation: string;
-}
+// Currently unused - kept for future features
+// interface WordExplanation {
+//   translation: string;
+//   example: string;
+//   example_explanation: string;
+// }
 
 interface GrammarAnalysis {
   grammar_patterns: Array<{
@@ -107,7 +108,7 @@ export default function Home() {
   
   // Authentication State
   const [isLoggedIn, setIsLoggedIn] = useState(false);
-  const [user, setUser] = useState<any>(null);
+  const [user, setUser] = useState<{ id: number; username: string } | null>(null);
   
   // User Management State
   const [currentUser, setCurrentUser] = useState('');
@@ -123,7 +124,7 @@ export default function Home() {
   const [adaptedText, setAdaptedText] = useState('');
   const [adaptationResult, setAdaptationResult] = useState<AdaptationResult | null>(null);
   
-  // Interactive Features State
+  // Interactive Features State (currently unused - kept for future features)
   const [selectedText, setSelectedText] = useState<string | null>(null);
   const [selectedWord, setSelectedWord] = useState<string | null>(null);
   
@@ -138,6 +139,7 @@ export default function Home() {
     position: { x: 0, y: 0 }
   });
   
+  // Currently unused - kept for future features
   const [isAddingWord, setIsAddingWord] = useState(false);
   
   // Settings State - Removed target percentage (not needed)
@@ -146,8 +148,8 @@ export default function Home() {
   const [activeTab, setActiveTab] = useState<'adaptation' | 'smart' | 'library' | 'vocabulary'>('adaptation');
   const [smartAnalysisText, setSmartAnalysisText] = useState<string>('');
 
-  // Grammar Analysis State - Now handled in Smart AI Teacher tab
-  const [grammarAnalysisResult, setGrammarAnalysisResult] = useState<GrammarAnalysisResult | null>(null);
+  // Grammar Analysis State - Currently unused (handled in Smart AI Teacher tab)
+  // const [grammarAnalysisResult, setGrammarAnalysisResult] = useState<GrammarAnalysisResult | null>(null);
 
   // ✅ Copy to Clipboard Function
   const copyToClipboard = async (text: string, type: 'original' | 'adapted') => {
@@ -585,8 +587,8 @@ export default function Home() {
       selectedText = selectedText.replace(/^\s+|\s+$/g, '').replace(/\s+/g, ' ');
       
       console.log('Selected text:', selectedText);
-      setSelectedText(selectedText);
-      setSelectedWord(selectedText);
+      setSelectedText(selectedText); // Currently unused
+      setSelectedWord(selectedText); // Currently unused
       
       // Open word popup for selected text (center of screen since no event)
       setWordPopup({
@@ -699,10 +701,10 @@ export default function Home() {
     setWordPopup(newPopupState);
   };
 
-  const handleAddWordToVocabulary = async (word: string, action: 'known' | 'unknown' | 'ignore') => {
+  const handleAddWordToVocabulary = async (word: string, action: 'know' | 'unknown' | 'ignore') => {
     console.log('🏠 HOMEPAGE handleAddWordToVocabulary called with:', { word, action });
     
-    setIsAddingWord(true);
+    setIsAddingWord(true); // Currently unused
     
     try {
       const response = await fetch('http://localhost:8000/api/vocabulary/add-word', {
@@ -738,7 +740,7 @@ export default function Home() {
         setWordPopup(prev => ({ ...prev, isOpen: false }));
         
         // Show success message
-        const actionText = action === 'known' ? 'bildiğin kelimeler listesine' : action === 'unknown' ? 'öğrenme listesine' : 'görmezden gelinen kelimeler listesine';
+        const actionText = action === 'know' ? 'bildiğin kelimeler listesine' : action === 'unknown' ? 'öğrenme listesine' : 'görmezden gelinen kelimeler listesine';
         const verb = responseData.updated ? 'güncellendi' : 'eklendi';
         let message = `"${word}" ${actionText} ${verb}!`;
         
@@ -754,7 +756,7 @@ export default function Home() {
       console.error('Failed to add word:', err);
       alert('Kelime eklenirken hata oluştu.');
     } finally {
-      setIsAddingWord(false);
+      setIsAddingWord(false); // Currently unused
     }
   };
 
