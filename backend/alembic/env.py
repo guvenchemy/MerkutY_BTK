@@ -2,7 +2,7 @@ from logging.config import fileConfig
 import os
 from dotenv import load_dotenv
 
-from sqlalchemy import engine_from_config
+from sqlalchemy import engine_from_config, create_engine
 from sqlalchemy import pool
 
 from alembic import context
@@ -22,6 +22,10 @@ config = context.config
 # Set the sqlalchemy.url from environment variable
 database_url = os.getenv("DATABASE_URL")
 if database_url:
+    # Ensure we use psycopg3 driver for SQLAlchemy 2.0+
+    if database_url.startswith("postgresql://") and "+psycopg" not in database_url:
+        database_url = database_url.replace("postgresql://", "postgresql+psycopg://", 1)
+    
     config.set_main_option("sqlalchemy.url", database_url)
     print(f"✅ Loaded DATABASE_URL from .env: {database_url}")
 else:
@@ -76,13 +80,20 @@ def run_migrations_online() -> None:
     and associate a connection with the context.
 
     """
-    # Debug: show the configuration being used
-    config_section = config.get_section(config.config_ini_section, {})
-    print(f"🔧 Alembic config section: {config_section}")
+    # Get DATABASE_URL from environment
+    database_url = os.getenv("DATABASE_URL")
+    if not database_url:
+        raise ValueError("DATABASE_URL environment variable is not set")
     
-    connectable = engine_from_config(
-        config_section,
-        prefix="sqlalchemy.",
+    # Ensure we use psycopg3 driver for SQLAlchemy 2.0+
+    if database_url.startswith("postgresql://") and "+psycopg" not in database_url:
+        database_url = database_url.replace("postgresql://", "postgresql+psycopg://", 1)
+    
+    print(f"✅ Using DATABASE_URL for Alembic: {database_url}")
+    
+    # Create engine directly with the DATABASE_URL
+    connectable = create_engine(
+        database_url,
         poolclass=pool.NullPool,
     )
 
