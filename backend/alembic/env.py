@@ -1,10 +1,14 @@
 from logging.config import fileConfig
+import os
+from dotenv import load_dotenv
 
 from sqlalchemy import engine_from_config
 from sqlalchemy import pool
 
 from alembic import context
-import os
+
+# Load environment variables from .env file
+load_dotenv()
 
 # Import our models
 from app.models.user_vocabulary import Base
@@ -15,10 +19,14 @@ from app.core.database import get_db
 # access to the values within the .ini file in use.
 config = context.config
 
-# Prefer DATABASE_URL from environment
-env_database_url = os.getenv("DATABASE_URL")
-if env_database_url:
-    config.set_main_option("sqlalchemy.url", env_database_url)
+# Set the sqlalchemy.url from environment variable
+database_url = os.getenv("DATABASE_URL")
+if database_url:
+    config.set_main_option("sqlalchemy.url", database_url)
+    print(f"✅ Loaded DATABASE_URL from .env: {database_url}")
+else:
+    print("⚠️  Warning: DATABASE_URL not found in environment variables!")
+    print("   Make sure you have a .env file with DATABASE_URL set")
 
 # Interpret the config file for Python logging.
 # This line sets up loggers basically.
@@ -47,7 +55,9 @@ def run_migrations_offline() -> None:
     script output.
 
     """
+    # Get the URL that we set from environment variable
     url = config.get_main_option("sqlalchemy.url")
+    print(f"🗄️  Using database URL for offline migrations: {url}")
     context.configure(
         url=url,
         target_metadata=target_metadata,
@@ -66,8 +76,12 @@ def run_migrations_online() -> None:
     and associate a connection with the context.
 
     """
+    # Debug: show the configuration being used
+    config_section = config.get_section(config.config_ini_section, {})
+    print(f"🔧 Alembic config section: {config_section}")
+    
     connectable = engine_from_config(
-        config.get_section(config.config_ini_section, {}),
+        config_section,
         prefix="sqlalchemy.",
         poolclass=pool.NullPool,
     )
